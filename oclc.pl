@@ -218,14 +218,24 @@ sub splitFile
 # FDI  P012569
 #
 # param:  dataFileName string name of the data file the label is for.
+# param:  date string.
 # param:  numRecords integer number of records in the file.
 # return: string name of the label file.
 sub createLabelFile
 {
-	my ($dataFileName, $numRecords) = @_;
+	my ($dataFileName, $date, $numRecords) = @_;
 	my ($filename, $directory, $suffix) = fileparse($dataFileName);
 	#print ">>".$filename." : ".$directory." : ".$suffix;
-	return "";
+	my $labelFileName = $directory.qq{LABEL}.substr($fileName, 4);
+	#print ">>>'$labelFileName'\n";
+	open LABEL, ">$labelFileName" or die "error couldn't create label file $fileName: $!\n";
+	print LABEL "DAT  20110405000000.0\n"; # TODO finish me.
+	print LABEL "RBF  $numRecords\n"; # like: 88947
+	print LABEL "DSN  $filename\n"; # DATA.D110405
+	print LABEL "ORS  CNEDM\n";
+	print LABEL "FDI  P012569\n";
+	close LABEL;
+	return $labelFileName;
 }
 
 # Opens the password file reads the old password and computes
