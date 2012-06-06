@@ -8,3 +8,5 @@ put:
 	scp ${LOCAL}oclc.pl ${USER}@${SERVER}:${REMOTE}
 get:
 	scp ${USER}@${SERVER}:${REMOTE}oclc.pl ${LOCAL}
+test:
+	perl -c oclc.pl
