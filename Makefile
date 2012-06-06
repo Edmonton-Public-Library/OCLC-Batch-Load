@@ -4,7 +4,7 @@ USER=sirsi
 REMOTE=~/Unicorn/EPLwork/anisbet/
 LOCAL=~/projects/oclc/
 
-get:
-	scp ${USER}@${SERVER}:${REMOTE}oclc.pl ${LOCAL}
 put:
 	scp ${LOCAL}oclc.pl ${USER}@${SERVER}:${REMOTE}
+get:
+	scp ${USER}@${SERVER}:${REMOTE}oclc.pl ${LOCAL}
