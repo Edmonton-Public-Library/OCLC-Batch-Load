@@ -36,14 +36,16 @@ sub usage
 
 Uploads bibliographic records to OCLC.
 
-usage: $0 [-x] 
+usage: $0 [-xd] [-s integer] [-i input]
 
+ -d        : Debug
  -i <file> : Path to the OCLC files to upload. This allows the
-             upload of pre-existing catalog dump.
+             upload of pre-existing catalog dump, otherwise the default
+             is to read from STDIN.
  -s size   : Maximum number of records per DATA file (default 90000).
  -x        : this (help) message
 
-example: $0 -x
+example: $0 -x -i catalog_dump.lst
 
 EOF
     exit;
@@ -52,8 +54,7 @@ EOF
 # Returns a timestamp for the log file only. The Database uses the default
 # time of writing the record for its timestamp in SQL. That was done to avoid
 # the snarl of differences between MySQL and Perl timestamp details.
-# Param:  isLogDate integer 0 returns a formatted date suitable for logs, anything else
-#         produces just the year month day ascii date.
+# Param:  isLogDate integer 0 = yyyymmdd, 1 = yymmdd, and passing nothing returns [yyyy-mm-dd hh:mm:ss].
 # Return: string of the current date and time as: '[yyyy-mm-dd hh:mm:ss]' or 'yyyymmdd'.
 sub getTimeStamp
 {
@@ -79,17 +80,24 @@ sub getTimeStamp
 	}
 	my $date = "$year-$mon-$mday";
 	my $time = "$hour:$min:$sec";
-	if (defined($isLogDate))
+	if (! defined($isLogDate))
+	{
+		my @yy  = split('',$year);
+		$year  = join('', @yy[2..3]);
+		if ($year < 10)
+		{
+			$year = "0$year";
+		}
+		return "$year$mon$mday";
+	}
+	if ($isLogDate == 1)
 	{
 		return "[$date $time]";
 	}
-	my @yy  = split('',$year);
-	$year  = join('', @yy[2..3]);
-	if ($year < 10)
+	else
 	{
-		$year = "0$year";
+		return "$year$mon$mday";
 	}
-	return "$year$mon$mday";
 }
 
 my $USER_NAME   = qq{TCNEDM1};      # User name.
@@ -106,7 +114,7 @@ open LOG, ">>$logFile";
 # return: 
 sub init
 {
-    my $opt_string = 'i:xs:';
+    my $opt_string = 'di:xs:';
     getopts( "$opt_string", \%opt ) or usage();
     usage() if ($opt{x});
     $maxRecords = $opt{'s'} if ($opt{s});
@@ -121,14 +129,14 @@ if ($opt{i})
     open(IN, "<$listFile") or die " error reading '$listFile': $!\n";
     @lines = <IN>;
 	close(IN);
-	print     getTimeStamp(1)." read $#lines lines from $listFile, using file size: $maxRecords\n";
-	print LOG getTimeStamp(1)." read $#lines lines from $listFile, using file size: $maxRecords\n";
+	print     getTimeStamp(1)." read ".@lines." lines from $listFile, using file size: $maxRecords\n";
+	print LOG getTimeStamp(1)." read ".@lines." lines from $listFile, using file size: $maxRecords\n";
 }
 else
 {
     @lines = <STDIN>;
-	print     getTimeStamp(1)." read $#lines lines from STDIN, using file size: $maxRecords\n";
-	print LOG getTimeStamp(1)." read $#lines lines from STDIN, using file size: $maxRecords\n";
+	print     getTimeStamp(1)." read ".@lines." lines from STDIN, using file size: $maxRecords\n";
+	print LOG getTimeStamp(1)." read ".@lines." lines from STDIN, using file size: $maxRecords\n";
 }
 
 
@@ -159,8 +167,8 @@ sub splitFile
 	my $suffix         = "aa";
 	my $filePath       = qq{$dir/DATA.D$date.$suffix}; # DATA.D120623.aa
 	open OUT, ">$filePath" || die "error opening '$filePath': $!\n";
-	print     getTimeStamp(1)." creating file: '$filePath'\n";
-	print LOG getTimeStamp(1)." creating file: '$filePath'\n";
+	print     getTimeStamp(1)." creating DATA file: '$filePath'\n";
+	print LOG getTimeStamp(1)." creating DATA file: '$filePath'\n";
 	foreach my $line (@lines)
 	{
 		chomp($line);
@@ -185,17 +193,20 @@ sub splitFile
 				$filePath = qq{$dir/DATA.D$date.$suffix};
 				$lineCount = 0;
 				open OUT, ">".$filePath or die "error opening '$filePath': $!\n";
-				print     getTimeStamp(1)." creating file: '$filePath'\n";
-				print LOG getTimeStamp(1)." creating file: '$filePath'\n";
+				print     getTimeStamp(1)." creating DATA file: '$filePath'\n";
+				print LOG getTimeStamp(1)." creating DATA file: '$filePath'\n";
 			}
 		}
 	}
 	close(OUT);
-	print "there are ".keys(%$fileSizeRef)." keys\n";
-	while ( my ($key, $value) = each(%$fileSizeRef) ) 
+	if ($opt{'d'})
 	{
-        print "$key => $value\n";
-    }
+		print "===there are ".keys(%$fileSizeRef)." keys\n";
+		while ( my ($key, $value) = each(%$fileSizeRef) ) 
+		{
+			print "===$key => $value\n";
+		}
+	}
 	return $fileSizeRef;
 }
 
@@ -218,23 +229,26 @@ sub splitFile
 # FDI  P012569
 #
 # param:  dataFileName string name of the data file the label is for.
-# param:  date string.
 # param:  numRecords integer number of records in the file.
 # return: string name of the label file.
 sub createLabelFile
 {
-	my ($dataFileName, $date, $numRecords) = @_;
-	my ($filename, $directory, $suffix) = fileparse($dataFileName);
-	#print ">>".$filename." : ".$directory." : ".$suffix;
+	my ($dataFileName, $numRecords) = @_;
+	my ($fileName, $directory, $suffix) = fileparse($dataFileName);
 	my $labelFileName = $directory.qq{LABEL}.substr($fileName, 4);
-	#print ">>>'$labelFileName'\n";
+	if ($opt{'d'})
+	{
+		print ">>>'$labelFileName'\n";
+	}
 	open LABEL, ">$labelFileName" or die "error couldn't create label file $fileName: $!\n";
-	print LABEL "DAT  20110405000000.0\n"; # TODO finish me.
+	print LABEL "DAT  ".getTimeStamp(0)."000000.0\n"; # TODO finish me.
 	print LABEL "RBF  $numRecords\n"; # like: 88947
-	print LABEL "DSN  $filename\n"; # DATA.D110405
+	print LABEL "DSN  $fileName\n"; # DATA.D110405
 	print LABEL "ORS  CNEDM\n";
 	print LABEL "FDI  P012569\n";
 	close LABEL;
+	print     getTimeStamp(1)." creating LABEL file: '$labelFileName'\n";
+	print LOG getTimeStamp(1)." creating LABEL file: '$labelFileName'\n";
 	return $labelFileName;
 }
 
