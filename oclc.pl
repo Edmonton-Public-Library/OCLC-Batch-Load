@@ -36,17 +36,24 @@ sub usage
 
 Uploads bibliographic records to OCLC.
 
-usage: $0 [-xd] [-s integer] [-i input]
+usage: $0 [-aADx] [-s file] [-f files]
 
- -d        : Debug
- -i <file> : Path to the OCLC files to upload. This allows the
-             upload of pre-existing catalog dump, otherwise the default
-             is to read from STDIN.
- -s size   : Maximum number of records per DATA file (default 90000).
+ -a [file] : Run the API commands to generate the catalog dump.
+             This will do a complete dump.
+ -A        : Do everything: run api catalog dump, split to default size
+             files and upload the split files and labels. Same as running
+			 -a -f 
+ -D        : Debug
+ -f [files]: FTP files to OCLC at default FTP URL. Predicated on 
+             files existing in the OCLC directory.
+ -s [file] : Split input into maximum number of records per DATA file
+            (90000).
  -x        : this (help) message
 
-example: $0 -x -i catalog_dump.lst
-
+example: $0 -s catalog_dump.lst
+         $0 -f "file1 label1 file2 label2"
+		 $0 -a
+         $0 -A
 EOF
     exit;
 }
@@ -100,12 +107,27 @@ sub getTimeStamp
 	}
 }
 
-my $USER_NAME   = qq{TCNEDM1};      # User name.
-my $PASSWORD;                       # Password for OCLC.
+#
+#
+#
+sub getPassword
+{
+	my $path = shift;
+	print "'$path' is the location of the password.\n" if ($opt{'D'});
+	open(PASSWORD, "<$path") or die "error: getPassword($path) failed: $!\n";
+	my @lines = <PASSWORD>;
+	close(PASSWORD);
+	die "error: password file must contain the password as the first line.\n" if (! @lines or $lines[0] eq "");
+	chomp($lines[0]);
+	return ++$lines[0];
+}
+
+my $userName    = qq{TCNEDM1};      # User name.
+my $ftpUrl;
 my $maxRecords  = 90000;            # Max number records we can upload at a time, use -s to change.
 my $date        = getTimeStamp;     # current date in ascii.
-my $listFile;                       # Initial OCLC list file.
 my $oclcDir     = qq{/s/sirsi/Unicorn/EPLwork/OCLC};
+my $passwordPath= "$oclcDir/password.txt";
 my $logDir      = $oclcDir;
 my $logFile     = "$logDir/oclc$date.log";  # Name and location of the log file.
 open LOG, ">>$logFile";
@@ -114,43 +136,63 @@ open LOG, ">>$logFile";
 # return: 
 sub init
 {
-    my $opt_string = 'di:xs:';
+    my $opt_string = 'AaDf:xs:';
     getopts( "$opt_string", \%opt ) or usage();
-    usage() if ($opt{x});
-    $maxRecords = $opt{'s'} if ($opt{s});
+    usage() if ($opt{'x'});
 }
 init();
-my @lines;
-# determine if we are reading from a file or from the command line.
-if ($opt{i})
+
+# If the user specified a specific file to split. It will split
+# ANY text file into 90000 line files.
+if ($opt{'A'})
 {
-	$listFile = $opt{'i'};
-	chomp($listFile);
-    open(IN, "<$listFile") or die " error reading '$listFile': $!\n";
-    @lines = <IN>;
-	close(IN);
-	print     getTimeStamp(1)." read ".@lines." lines from $listFile, using file size: $maxRecords\n";
-	print LOG getTimeStamp(1)." read ".@lines." lines from $listFile, using file size: $maxRecords\n";
-}
-else
-{
-    @lines = <STDIN>;
-	print     getTimeStamp(1)." read ".@lines." lines from STDIN, using file size: $maxRecords\n";
-	print LOG getTimeStamp(1)." read ".@lines." lines from STDIN, using file size: $maxRecords\n";
+	print "-A selected do everything.\n" if ($opt{'D'});
+	exit 1;
 }
 
-
-# Stores the file name (complete path) as a key to the number of items in the file.
-my $fileCounts = splitFile($oclcDir, $maxRecords, $date, @lines);
-# now create the LABEL files
-foreach my $fileName (keys %$fileCounts)
+# make a dump of the catalog.
+if ($opt{'a'})
 {
-	createLabelFile($fileName, $fileCounts->{$fileName});
+	print "-a selected -run API.\n" if ($opt{'D'});
 }
+# split a given file into parts.
+if ($opt{'s'})
+{
+	print "-s selected -split file $opt{s}.\n" if ($opt{'D'});
+	my @lines;
+	open(STDIN, "<$opt{'s'}") or die " error reading '".$opt{'s'}."': $!\n";
+	@lines = <>;
+	close(STDIN);
+	print     getTimeStamp(1)." read ".@lines." lines read, using file size: $maxRecords\n";
+	print LOG getTimeStamp(1)." read ".@lines." lines read, using file size: $maxRecords\n";
+	# Stores the file name (complete path) as a key to the number of items in the file.
+	my $fileCounts = splitFile($oclcDir, $maxRecords, $date, @lines);
+	# now create the LABEL files
+	foreach my $fileName (keys %$fileCounts)
+	{
+		createLabelFile($fileName, $fileCounts->{$fileName});
+	}
+}
+# FTP the files.
+if ($opt{'f'})
+{
+	print "-f selected -ftp files: '$opt{s}'\n" if ($opt{'D'});
+	my @ftpList = split(' ', $opt{'f'});
+	exit 1 if (! @ftpList);
+	my $password = getPassword($passwordPath);
+	foreach my $file (@ftpList)
+	{
+		print "$file\n";#ftp($userName, $password, $url, $file);
+	}
+	print "$password\n";
+}
+
 close(LOG);
 1; # exit with successful status.
 
 # ======================== Functions =========================
+
+
 
 # Takes the list and splits it into 'n' sized record files, creating
 # the LABEL files as it goes.
@@ -238,7 +280,7 @@ sub createLabelFile
 	my $labelFileName = $directory.qq{LABEL}.substr($fileName, 4);
 	if ($opt{'d'})
 	{
-		print ">>>'$labelFileName'\n";
+		print "LABEL: '$labelFileName'\n";
 	}
 	open LABEL, ">$labelFileName" or die "error couldn't create label file $fileName: $!\n";
 	print LABEL "DAT  ".getTimeStamp(0)."000000.0\n"; # TODO finish me.

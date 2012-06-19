@@ -3,10 +3,11 @@ SERVER=eplapp.library.ualberta.ca
 USER=sirsi
 REMOTE=~/Unicorn/EPLwork/anisbet/
 LOCAL=~/projects/oclc/
+APP=oclc.pl
 
 put:
-	scp ${LOCAL}oclc.pl ${USER}@${SERVER}:${REMOTE}
+	scp ${LOCAL}${APP} ${USER}@${SERVER}:${REMOTE}
 get:
-	scp ${USER}@${SERVER}:${REMOTE}oclc.pl ${LOCAL}
+	scp ${USER}@${SERVER}:${REMOTE}${APP} ${LOCAL}
 test:
-	perl -c oclc.pl
+	perl -c ${APP}
