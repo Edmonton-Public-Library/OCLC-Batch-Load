@@ -5,7 +5,7 @@ REMOTE=~/Unicorn/EPLwork/anisbet/
 LOCAL=~/projects/oclc/
 APP=oclc.pl
 
-put:
+put: test
 	scp ${LOCAL}${APP} ${USER}@${SERVER}:${REMOTE}
 get:
 	scp ${USER}@${SERVER}:${REMOTE}${APP} ${LOCAL}
