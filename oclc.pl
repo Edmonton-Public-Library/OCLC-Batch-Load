@@ -25,7 +25,8 @@ use strict;
 use warnings;
 use vars qw/ %opt /;
 use Getopt::Std;
-use File::Basename;
+# use File::Basename;
+use Net::FTP;
 
 # Prints usage message then exits.
 # param:
@@ -107,19 +108,41 @@ sub getTimeStamp
 	}
 }
 
+# Returns the password, or a new password, based on the contents of the password file 
+# specified in the 'path' parameter. Only the first line of the password
+# file is checked and any characters on the first line (with the exception of the 
+# new line character) are considered part of the password. Any other lines in the 
+# file are ignored and will be deleted if the isNewPasswordRequest paramater is passed.
 #
-#
-#
+# param:  path string - location of the password file.
+# param:  isNewPasswordRequest anyType - pass in a 1 if you want a new password generated
+#         The old password is read from file, a new password is generated, the old password
+#         file is deleted and the new password is written to the file specified by param: path. 
+# return: password string.
 sub getPassword
 {
 	my $path = shift;
-	print "'$path' is the location of the password.\n" if ($opt{'D'});
+	my $isNewPasswordRequest = shift;
+	my $newPassword;
 	open(PASSWORD, "<$path") or die "error: getPassword($path) failed: $!\n";
 	my @lines = <PASSWORD>;
 	close(PASSWORD);
 	die "error: password file must contain the password as the first line.\n" if (! @lines or $lines[0] eq "");
-	chomp($lines[0]);
-	return ++$lines[0];
+	$newPassword = $lines[0];
+	chomp($newPassword);
+	if (defined($isNewPasswordRequest))
+	{
+		my @passwdChars = split('', $newPassword);
+		++$passwdChars[$#passwdChars];
+		$newPassword = join('',@passwdChars);
+		warn "error: getPassword($path) failed to remove old password file: $!\n" if (! unlink($path));
+		# this will allow the user to get a new password even if there was a problem removing the old file
+		# or saving to a new file.
+		open(PASSWORD, ">$path") or print "error: getPassword($path) failed: $!, the new password is $newPassword\n";
+		print PASSWORD "$newPassword\n";
+		close(PASSWORD);
+	}
+	return $newPassword;
 }
 
 my $userName    = qq{TCNEDM1};      # User name.
@@ -176,10 +199,12 @@ if ($opt{'s'})
 # FTP the files.
 if ($opt{'f'})
 {
-	print "-f selected -ftp files: '$opt{s}'\n" if ($opt{'D'});
+	print "-f selected -ftp files: '$opt{f}'\n" if ($opt{'D'});
 	my @ftpList = split(' ', $opt{'f'});
 	exit 1 if (! @ftpList);
-	my $password = getPassword($passwordPath);
+	my $password = getPassword($passwordPath, 1);
+	print     getTimeStamp(1)." password read.\n";
+	print LOG getTimeStamp(1)." password read.\n";
 	foreach my $file (@ftpList)
 	{
 		print "$file\n";#ftp($userName, $password, $url, $file);
@@ -192,7 +217,14 @@ close(LOG);
 
 # ======================== Functions =========================
 
-
+#
+#
+#
+sub ftp
+{
+	my ($host, $dir, $userName, $password, @fileList) = @_;
+	
+}
 
 # Takes the list and splits it into 'n' sized record files, creating
 # the LABEL files as it goes.
