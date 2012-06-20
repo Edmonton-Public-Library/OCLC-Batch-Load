@@ -25,7 +25,7 @@ use strict;
 use warnings;
 use vars qw/ %opt /;
 use Getopt::Std;
-# use File::Basename;
+use File::Basename;  # Used in ftp() for local and remote file identification.
 use Net::FTP;
 
 # Prints usage message then exits.
@@ -145,8 +145,12 @@ sub getPassword
 	return $newPassword;
 }
 
-my $userName    = qq{TCNEDM1};      # User name.
-my $ftpUrl;
+##### Server side parameters
+my $edxAccount  = qq{cnedm};
+my $userName    = "t".$edxAccount."1";      # User name.
+my $ftpUrl      = qq{edx.oclc.org};
+my $ftpDir      = qq{edx.ebsb.$edxAccount.ftp};
+##### Client side parameters
 my $maxRecords  = 90000;            # Max number records we can upload at a time, use -s to change.
 my $date        = getTimeStamp;     # current date in ascii.
 my $oclcDir     = qq{/s/sirsi/Unicorn/EPLwork/OCLC};
@@ -202,14 +206,20 @@ if ($opt{'f'})
 	print "-f selected -ftp files: '$opt{f}'\n" if ($opt{'D'});
 	my @ftpList = split(' ', $opt{'f'});
 	exit 1 if (! @ftpList);
-	my $password = getPassword($passwordPath, 1);
-	print     getTimeStamp(1)." password read.\n";
+	my $password = getPassword($passwordPath);
 	print LOG getTimeStamp(1)." password read.\n";
 	foreach my $file (@ftpList)
 	{
-		print "$file\n";#ftp($userName, $password, $url, $file);
+		print "$file\n";#ftp($ftpUrl, $ftpDir, $userName, $password, @files);
 	}
 	print "$password\n";
+	#ftp($ftpUrl, $ftpDir, $userName, $password, @files);
+	ftp("ftp.epl.ca", "atest", "mark", "R2GnBVtt", "./test.j");
+	# ftp("ftp.epl.cb", "atest", "mark", "R2GnBVtt", "./test.j"); #fail
+	# ftp("ftp.epl.ca", "btest", "mark", "R2GnBVtt", "./test.j"); #fail
+	# ftp("ftp.epl.ca", "atest", "amark", "R2GnBVtt", "./test.j"); #fail
+	# ftp("ftp.epl.ca", "atest", "mark", "aR2GnBVtt", "./test.j"); #fail
+	# ftp("ftp.epl.ca", "atest", "mark", "R2GnBVtt", "./test.a"); #fail
 }
 
 close(LOG);
@@ -222,8 +232,39 @@ close(LOG);
 #
 sub ftp
 {
-	my ($host, $dir, $userName, $password, @fileList) = @_;
-	
+	my ($host, $directory, $userName, $password, @fileList) = @_;
+	my $newError = 0;
+	my $ftp = Net::FTP->new($host, Timeout=>240) or die "can't ftp to $host: $!\n";
+	print "connected to $host\n";
+	$ftp->login($userName, $password) or $newError = 1;
+	if ($newError)
+	{
+		print LOG getTimeStamp(1)."Can't login to $host: $!\n";
+		$ftp->quit;
+	}
+	print "logged in\n";
+	$ftp->cwd($directory) or $newError = 1; 
+	if ($newError)
+	{
+		print LOG getTimeStamp(1)."can't change to $directory on $host: $!\n";
+		$ftp->quit;
+	}
+	$ftp->binary;
+	foreach my $localFile (@fileList)
+	{
+		# locally we use the fully qualified path but
+		# remotely we just put the file in the directory.
+		my ($remoteFile, $directories, $suffix) = fileparse($localFile);
+		print "...putting: $remoteFile\n";
+		$ftp->put($localFile, $remoteFile) or $newError = 1;
+		if ($newError)
+		{
+			print LOG getTimeStamp(1)."ftp->put: failed to upload $localFile to $host: $!\n";
+			$ftp->quit;
+		}
+		print LOG getTimeStamp(1)."ftp->put: uploaded $localFile to $host\n";
+	}
+	$ftp->quit;
 }
 
 # Takes the list and splits it into 'n' sized record files, creating
@@ -324,13 +365,4 @@ sub createLabelFile
 	print     getTimeStamp(1)." creating LABEL file: '$labelFileName'\n";
 	print LOG getTimeStamp(1)." creating LABEL file: '$labelFileName'\n";
 	return $labelFileName;
-}
-
-# Opens the password file reads the old password and computes
-# the new password and saves it - clobbering the old name and file.
-# param: string path location of password file.
-# return: string new password.
-sub getNewPassword
-{
-	return "";
 }
