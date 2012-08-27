@@ -39,21 +39,25 @@ Uploads bibliographic records to OCLC.
 
 usage: $0 [-aADx] [-s file] [-f files]
 
- -a [file] : Run the API commands to generate the catalog dump.
-             This will do a complete dump.
- -A        : Do everything: run api catalog dump, split to default size
-             files and upload the split files and labels. Same as running
-			 -a -f 
- -D        : Debug
- -f [files]: FTP files to OCLC at default FTP URL. Predicated on 
-             files existing in the OCLC directory.
- -s [file] : Split input into maximum number of records per DATA file
-            (90000).
- -x        : this (help) message
+ -a [file]     : Run the API commands to generate the catalog dump.
+                 This will do a complete dump.
+ -A            : Do everything: run api catalog dump, split to default size
+                 files and upload the split files and labels. Same as running
+			     -a -f 
+ -d [start,end]: Comma separated start and end date. Restricts search for items by create and 
+                 modify dates. Defaults to one month ago as specified by 'transdate -m-1' and 
+				 today's date for an end date. Both are optional but must be valid ANSI dates or
+				 the defaults are used.
+ -D            : Debug
+ -f [files]    : FTP files to OCLC at default FTP URL. Predicated on 
+                 files existing in the OCLC directory.
+ -s [file]     : Split input into maximum number of records per DATA file
+                 (90000).
+ -x            : this (help) message
 
 example: $0 -s catalog_dump.lst
          $0 -f "file1 label1 file2 label2"
-		 $0 -a
+         $0 -a
          $0 -A
 EOF
     exit;
@@ -163,7 +167,7 @@ open LOG, ">>$logFile";
 # return: 
 sub init
 {
-    my $opt_string = 'AaDf:xs:';
+    my $opt_string = 'AaDf:xs:d:';
     getopts( "$opt_string", \%opt ) or usage();
     usage() if ($opt{'x'});
 }
@@ -177,19 +181,54 @@ if ($opt{'A'})
 	exit 1;
 }
 
+#
+# Returns '<', '>' dates based on -d switch specified by the user. 
+# The format is -d"<start_ANSI>,<end_ANSI>", like -d"20120101,20120201".
+# not specifying a start date defaults to one month ago, as defined by transdate -d-30.
+# Not specifying end date defaults to today. The start date is the furthest date back in time.
+# The end date is the most recent.
+# param:  none
+# return: ">startDate<endDate"
+#
+sub getDateBounds
+{
+	my $startDate = `transdate -d-30`;
+	chomp( $startDate );
+	my $endDate   = `transdate -d-0`;
+	chomp( $endDate );
+	if  ( $opt{'d'} )
+	{
+		my @dates = split( ',', $opt{'d'});
+		if ( $dates[0] and $dates[0] ne "" and $dates[0] =~ m/\d{8}/ )
+		{
+			$startDate = $dates[0];
+		}
+		if ( $dates[1] and $dates[1] ne "" and $dates[1] =~ m/\d{8}/ )
+		{
+			$endDate = $dates[1];
+		}
+	}
+	return ">$startDate<$endDate";
+}
+
 # make a dump of the catalog.
 if ($opt{'a'})
 {
-	my $tmpInitialItemCatKeys = qq{tmp_initialselitemcatkeys};
-	my $tmpSortedItemCatKeys  = qq{tmp_initialselitemcatkeys_sorted};
+	my $logfilename        = qq{oclc.log};
+	my $initialItemCatKeys = qq{tmp_a};
+	my $sortedItemCatKeys  = qq{tmp_b};
+	my $dateRefinedCatKeys = qq{tmp_c};
+	my $sortedDatedCatKeys = qq{tmp_d};
 	print "-a selected -run API.\n" if ($opt{'D'});
 	# my $unicornItemTypes = "PAPERBACK,JPAPERBACK,BKCLUBKIT,COMIC,DAISYRD,EQUIPMENT,E-RESOURCE,FLICKSTOGO,FLICKTUNE,JFLICKTUNE,JTUNESTOGO,PAMPHLET,RFIDSCANNR,TUNESTOGO,JFLICKTOGO,PROGRAMKIT,LAPTOP,BESTSELLER,JBESTSELLR";
 	my $unicornItemTypes = "PAPERBACK";
 	my $unicornLocations = "BARCGRAVE,CANC_ORDER,DISCARD,EPLACQ,EPLBINDERY,EPLCATALOG,EPLILL,INCOMPLETE,LONGOVRDUE,LOST,LOST-ASSUM,LOST-CLAIM,LOST-PAID,MISSING,NON-ORDER,ON-ORDER,BINDERY,CATALOGING,COMICBOOK,INTERNET,PAMPHLET,DAMAGE,UNKNOWN,REF-ORDER,BESTSELLER,JBESTSELLR,STOLEN";
 	print "$unicornItemTypes\n" if ($opt{'D'});
 	# gets all the keys of items that don't match the location list or item type lists.
-	# `selitem -t~$unicornItemTypes -l~$unicornLocations -oC >tmp_initialselitemcatkeys`;
-	open( INITIAL_CAT_KEYS, "<$tmpInitialItemCatKeys" ) or die "No items found.\n";
+	print "selecting initial catalogue keys...\n";
+	# `selitem -t~$unicornItemTypes -l~$unicornLocations -oC >$initialItemCatKeys`;
+	open( INITIAL_CAT_KEYS, "<$initialItemCatKeys" ) or die "No items found.\n";
+	print "sorting initial catalogue key selection...\n";
 	my %initialKeys;
 	while (<INITIAL_CAT_KEYS>)
 	{
@@ -198,24 +237,52 @@ if ($opt{'a'})
 		$initialKeys{$_} = 1;
 	}
 	close( INITIAL_CAT_KEYS );
-	# unlink( $tmpInitialItemCatKeys ); # this file can be very large so dispose of early.
-	## `cat tmp_initialselitemcatkeys | sort | uniq >tmp_initialselitemcatkeys_sorted` below is the equiv. We do this because unix sort sorts alphabetically and 
-	# we sort numerically.
-	open( SORTED_CAT_KEYS, ">$tmpSortedItemCatKeys" ) or die "No items to sort.\n";
+	# we sort keys numerically.
+	open( SORTED_CAT_KEYS, ">$sortedItemCatKeys" ) or die "No items to sort.\n";
 	# sort the keys in numerical order, sort | uniq produces a pseudo-sort.
 	foreach my $key (sort {$a <=> $b} keys(%initialKeys))
 	{
 		print SORTED_CAT_KEYS $key."|\n";
 	}
 	close( SORTED_CAT_KEYS );
-	# my @itemKeys = selectUniqueAndSort( $results ); split( '\n', $result );
-	## -----------------------------------------------------------------
+	my $dateBoundaries = getDateBounds();
+	print "refining item selection based on '$dateBoundaries'...\n";
+	print "$dateBoundaries\n" if ( $opt{'D'} );
 	# select all catalog keys for items that were either modified or created between the dates selected.
-	# cat tmp_initialselitemcatkeys_sorted | selcatalog -iC -oC -p">$DateCreatedStart<$DateCreatedEnd" >tmp_initialcatkeys 2>>$logfilename
-	# cat tmp_initialselitemcatkeys_sorted | selcatalog -iC -oC -r">$DateCreatedStart<$DateCreatedEnd" >>tmp_initialcatkeys 2>>$logfilename
-	# cat tmp_initialcatkeys | sort | uniq > tmp_initialcatkeys_sorted
+	print "create date criteria...\n";
+	`cat $sortedItemCatKeys | selcatalog -iC -oC -p"$dateBoundaries" > $dateRefinedCatKeys 2>>$logfilename`;
+	print "modified date criteria...\n";
+	`cat $sortedItemCatKeys | selcatalog -iC -oC -r"$dateBoundaries" >>$dateRefinedCatKeys 2>>$logfilename`;
+	# cat $dateRefinedCatKeys | sort | uniq > tmp_initialcatkeys_sorted
+	print "sorting date refined catalogue key selection...\n";
+	open( DATED_CAT_KEYS, "<$dateRefinedCatKeys" ) or die "No items found refined by date: $!\n";
+	my %dateRefinedKeys;
+	while (<DATED_CAT_KEYS>)
+	{
+		chop $_; # remove new line for numeric sort
+		chop $_; # remove pipe for numeric sort
+		$dateRefinedKeys{$_} = 1;
+	}
+	close( DATED_CAT_KEYS );
+	open( SORTED_DATED_CAT_KEYS, ">$sortedDatedCatKeys" ) or die "Error opening file to write sorted, date refined CAT keys, $!\n";
+	foreach my $finalKey (sort {$a <=> $b} keys(%dateRefinedKeys))
+	{
+		print SORTED_DATED_CAT_KEYS $finalKey."|\n";
+	}
+	close( SORTED_DATED_CAT_KEYS );
+	if ( not $opt{'D'} )
+	{
+		unlink( $tmp_a );
+		unlink( $tmp_b );
+		unlink( $tmp_c );
+		# next do a catalog dump to do tomorrow.
+		# unlink( $tmp_d ); # so far this contains the final results.
+	}
+	print "...done.\n";
 	exit;
 }
+
+
 # split a given file into parts.
 if ($opt{'s'})
 {
