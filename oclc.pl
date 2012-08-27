@@ -180,7 +180,41 @@ if ($opt{'A'})
 # make a dump of the catalog.
 if ($opt{'a'})
 {
+	my $tmpInitialItemCatKeys = qq{tmp_initialselitemcatkeys};
+	my $tmpSortedItemCatKeys  = qq{tmp_initialselitemcatkeys_sorted};
 	print "-a selected -run API.\n" if ($opt{'D'});
+	# my $unicornItemTypes = "PAPERBACK,JPAPERBACK,BKCLUBKIT,COMIC,DAISYRD,EQUIPMENT,E-RESOURCE,FLICKSTOGO,FLICKTUNE,JFLICKTUNE,JTUNESTOGO,PAMPHLET,RFIDSCANNR,TUNESTOGO,JFLICKTOGO,PROGRAMKIT,LAPTOP,BESTSELLER,JBESTSELLR";
+	my $unicornItemTypes = "PAPERBACK";
+	my $unicornLocations = "BARCGRAVE,CANC_ORDER,DISCARD,EPLACQ,EPLBINDERY,EPLCATALOG,EPLILL,INCOMPLETE,LONGOVRDUE,LOST,LOST-ASSUM,LOST-CLAIM,LOST-PAID,MISSING,NON-ORDER,ON-ORDER,BINDERY,CATALOGING,COMICBOOK,INTERNET,PAMPHLET,DAMAGE,UNKNOWN,REF-ORDER,BESTSELLER,JBESTSELLR,STOLEN";
+	print "$unicornItemTypes\n" if ($opt{'D'});
+	# gets all the keys of items that don't match the location list or item type lists.
+	# `selitem -t~$unicornItemTypes -l~$unicornLocations -oC >tmp_initialselitemcatkeys`;
+	open( INITIAL_CAT_KEYS, "<$tmpInitialItemCatKeys" ) or die "No items found.\n";
+	my %initialKeys;
+	while (<INITIAL_CAT_KEYS>)
+	{
+		chop $_; # remove new line for numeric sort
+		chop $_; # remove pipe for numeric sort
+		$initialKeys{$_} = 1;
+	}
+	close( INITIAL_CAT_KEYS );
+	# unlink( $tmpInitialItemCatKeys ); # this file can be very large so dispose of early.
+	## `cat tmp_initialselitemcatkeys | sort | uniq >tmp_initialselitemcatkeys_sorted` below is the equiv. We do this because unix sort sorts alphabetically and 
+	# we sort numerically.
+	open( SORTED_CAT_KEYS, ">$tmpSortedItemCatKeys" ) or die "No items to sort.\n";
+	# sort the keys in numerical order, sort | uniq produces a pseudo-sort.
+	foreach my $key (sort {$a <=> $b} keys(%initialKeys))
+	{
+		print SORTED_CAT_KEYS $key."|\n";
+	}
+	close( SORTED_CAT_KEYS );
+	# my @itemKeys = selectUniqueAndSort( $results ); split( '\n', $result );
+	## -----------------------------------------------------------------
+	# select all catalog keys for items that were either modified or created between the dates selected.
+	# cat tmp_initialselitemcatkeys_sorted | selcatalog -iC -oC -p">$DateCreatedStart<$DateCreatedEnd" >tmp_initialcatkeys 2>>$logfilename
+	# cat tmp_initialselitemcatkeys_sorted | selcatalog -iC -oC -r">$DateCreatedStart<$DateCreatedEnd" >>tmp_initialcatkeys 2>>$logfilename
+	# cat tmp_initialcatkeys | sort | uniq > tmp_initialcatkeys_sorted
+	exit;
 }
 # split a given file into parts.
 if ($opt{'s'})
