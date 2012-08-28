@@ -94,6 +94,7 @@ sub getTimeStamp
 	my $time = "$hour:$min:$sec";
 	if (! defined($isLogDate))
 	{
+		# strip of century most significant digits.
 		my @yy  = split('',$year);
 		$year  = join('', @yy[2..3]);
 		if ($year < 10)
@@ -181,40 +182,10 @@ if ($opt{'A'})
 	exit 1;
 }
 
-#
-# Returns '<', '>' dates based on -d switch specified by the user. 
-# The format is -d"<start_ANSI>,<end_ANSI>", like -d"20120101,20120201".
-# not specifying a start date defaults to one month ago, as defined by transdate -d-30.
-# Not specifying end date defaults to today. The start date is the furthest date back in time.
-# The end date is the most recent.
-# param:  none
-# return: ">startDate<endDate"
-#
-sub getDateBounds
-{
-	my $startDate = `transdate -d-30`;
-	chomp( $startDate );
-	my $endDate   = `transdate -d-0`;
-	chomp( $endDate );
-	if  ( $opt{'d'} )
-	{
-		my @dates = split( ',', $opt{'d'});
-		if ( $dates[0] and $dates[0] ne "" and $dates[0] =~ m/\d{8}/ )
-		{
-			$startDate = $dates[0];
-		}
-		if ( $dates[1] and $dates[1] ne "" and $dates[1] =~ m/\d{8}/ )
-		{
-			$endDate = $dates[1];
-		}
-	}
-	return ">$startDate<$endDate";
-}
-
 # make a dump of the catalog.
 if ($opt{'a'})
 {
-	my $logfilename        = qq{oclc.log};
+	my $logfilename        = qq{oclcAPI.log};
 	my $initialItemCatKeys = qq{tmp_a};
 	my $sortedItemCatKeys  = qq{tmp_b};
 	my $dateRefinedCatKeys = qq{tmp_c};
@@ -272,35 +243,29 @@ if ($opt{'a'})
 	close( SORTED_DATED_CAT_KEYS );
 	if ( not $opt{'D'} )
 	{
-		unlink( $tmp_a );
-		unlink( $tmp_b );
-		unlink( $tmp_c );
-		# next do a catalog dump to do tomorrow.
-		# unlink( $tmp_d ); # so far this contains the final results.
+		unlink( $initialItemCatKeys );
+		unlink( $sortedItemCatKeys  );
+		unlink( $dateRefinedCatKeys );
 	}
-	print "...done.\n";
-	exit;
+	print "...done API selection saved in '$sortedDatedCatKeys'\n";
 }
 
 
-# split a given file into parts.
+# Splits a given file into parts.
+#### TEST ####
 if ($opt{'s'})
 {
-	print "-s selected -split file $opt{s}.\n" if ($opt{'D'});
-	my @lines;
-	open(STDIN, "<$opt{'s'}") or die " error reading '".$opt{'s'}."': $!\n";
-	@lines = <>;
-	close(STDIN);
-	print     getTimeStamp(1)." read ".@lines." lines read, using file size: $maxRecords\n";
-	print LOG getTimeStamp(1)." read ".@lines." lines read, using file size: $maxRecords\n";
-	# Stores the file name (complete path) as a key to the number of items in the file.
-	my $fileCounts = splitFile($oclcDir, $maxRecords, $date, @lines);
-	# now create the LABEL files
-	foreach my $fileName (keys %$fileCounts)
-	{
-		createLabelFile($fileName, $fileCounts->{$fileName});
-	}
+	my $date = getTimeStamp(); # get century most significant digits stripped date.
+	print "-s selected -split file $opt{s} on $date\n" if ($opt{'D'});
+	print     getTimeStamp(1)." reading '".$opt{'s'}."' lines read, using file size: $maxRecords\n";
+	print LOG getTimeStamp(1)." reading '".$opt{'s'}."' lines read, using file size: $maxRecords\n";
+	# Stores the file name (complete path) as a key and the number of items in the file as the value.
+	# Use return value for -A switch to get the list of files and their size otherwise you can just use this 
+	# to split an arbitrary file.
+	# my $fileCounts = splitFile($maxRecords, $date, $opt{'s'});
+	splitFile($maxRecords, $date, $opt{'s'});
 }
+
 # FTP the files.
 if ($opt{'f'})
 {
@@ -327,6 +292,36 @@ close(LOG);
 1; # exit with successful status.
 
 # ======================== Functions =========================
+
+#
+# Returns '<', '>' dates based on -d switch specified by the user. 
+# The format is -d"<start_ANSI>,<end_ANSI>", like -d"20120101,20120201".
+# not specifying a start date defaults to one month ago, as defined by transdate -d-30.
+# Not specifying end date defaults to today. The start date is the furthest date back in time.
+# The end date is the most recent.
+# param:  none
+# return: ">startDate<endDate"
+#
+sub getDateBounds
+{
+	my $startDate = `transdate -d-30`;
+	chomp( $startDate );
+	my $endDate   = `transdate -d-0`;
+	chomp( $endDate );
+	if  ( $opt{'d'} )
+	{
+		my @dates = split( ',', $opt{'d'});
+		if ( $dates[0] and $dates[0] ne "" and $dates[0] =~ m/\d{8}/ )
+		{
+			$startDate = $dates[0];
+		}
+		if ( $dates[1] and $dates[1] ne "" and $dates[1] =~ m/\d{8}/ )
+		{
+			$endDate = $dates[1];
+		}
+	}
+	return ">$startDate<$endDate";
+}
 
 #
 #
@@ -368,54 +363,52 @@ sub ftp
 	$ftp->quit;
 }
 
-# Takes the list and splits it into 'n' sized record files, creating
-# the LABEL files as it goes.
-# param:  maxRecords
-# param:  filePath string of path to file.
-# param:  fileSizes hash of file name to size of record.
+# Takes the list and splits it into 'n' sized record files.
+# param:  max number of records per file.
+# param:  date ANSI, but without century, so yymmdd.
+# param:  file input name. split files created in current directory.
 # return: hash reference of fileSizes.
 sub splitFile
 {
-	my ($dir, $maxRecords, $date, @lines) = @_;
-	my $fileSizeRef;
+	my ($maxRecords, $date, $fileInput) = @_;
+	my $fileSizeRef;        # hash ref of file names and record sizes.
 	my $lineCount      = 0;
 	my $totalLineCount = 0;
 	my $suffix         = "aa";
-	my $filePath       = qq{$dir/DATA.D$date.$suffix}; # DATA.D120623.aa
+	my $filePath       = qq{DATA.D$date.$suffix}; # DATA.D120623.aa
 	open OUT, ">$filePath" || die "error opening '$filePath': $!\n";
 	print     getTimeStamp(1)." creating DATA file: '$filePath'\n";
 	print LOG getTimeStamp(1)." creating DATA file: '$filePath'\n";
-	foreach my $line (@lines)
+	open(INPUT, "<$fileInput") or die "Error opening file to split: $!\n";
+	while(<INPUT>)
 	{
-		chomp($line);
+		chomp($_);
 		$lineCount++;
-		print OUT "$line\n";
+		print OUT "$_\n";
 		# The or statement is for the case where the last file has less than
 		# the maximum number of allowed records, we need the count from that
 		# file as well.
-		if ($lineCount >= $maxRecords or $totalLineCount + $lineCount == @lines)
+		if ( $lineCount >= $maxRecords )
 		{
 			close(OUT);
 			# Save the file count for making LABEL files.
 			$fileSizeRef->{ $filePath } = $lineCount;
-			$totalLineCount += $lineCount;
+			$lineCount = 0;
 			# If there are more records, make a new file for them. To not check leaves
 			# one empty file left over.
-			if ($totalLineCount < @lines)
-			{
-				# Increment the file extension.
-				$suffix = ++$suffix;
-				# Create a new file name and path.
-				$filePath = qq{$dir/DATA.D$date.$suffix};
-				$lineCount = 0;
-				open OUT, ">".$filePath or die "error opening '$filePath': $!\n";
-				print     getTimeStamp(1)." creating DATA file: '$filePath'\n";
-				print LOG getTimeStamp(1)." creating DATA file: '$filePath'\n";
-			}
+			
+			# Increment the file extension.
+			$suffix = ++$suffix;
+			# Create a new file name and path.
+			$filePath = qq{DATA.D$date.$suffix};
+			open( OUT, ">$filePath" ) or die "error opening '$filePath': $!\n";
+			print     getTimeStamp(1)." creating DATA file: '$filePath'\n";
+			print LOG getTimeStamp(1)." creating DATA file: '$filePath'\n";
 		}
 	}
 	close(OUT);
-	if ($opt{'d'})
+	close(INPUT);
+	if ( $opt{'d'} )
 	{
 		print "===there are ".keys(%$fileSizeRef)." keys\n";
 		while ( my ($key, $value) = each(%$fileSizeRef) ) 
@@ -444,26 +437,29 @@ sub splitFile
 # ORS  CNEDM
 # FDI  P012569
 #
-# param:  dataFileName string name of the data file the label is for.
-# param:  numRecords integer number of records in the file.
+# param:  hash reference of dataFileName string name as key and numRecords (integer) number of records in the file as value.
 # return: string name of the label file.
-sub createLabelFile
+#### TEST ####
+sub createOCLCLableFiles
 {
-	my ($dataFileName, $numRecords) = @_;
-	my ($fileName, $directory, $suffix) = fileparse($dataFileName);
-	my $labelFileName = $directory.qq{LABEL}.substr($fileName, 4);
-	if ($opt{'d'})
+	my $fileCountHashRef = $_;
+	# now create the LABEL files
+	while( my ($dataFileName, $numRecords) = each %$fileCountHashRef )
 	{
-		print "LABEL: '$labelFileName'\n";
+		my ($fileName, $directory, $suffix) = fileparse($dataFileName);
+		my $labelFileName = $directory.qq{LABEL}.substr($fileName, 4);
+		if ( $opt{'d'} )
+		{
+			print "LABEL: '$labelFileName'\n";
+		}
+		open( LABEL, ">$labelFileName" ) or die "error couldn't create label file '$fileName': $!\n";
+		print LABEL "DAT  ".getTimeStamp(0)."000000.0\n"; # TODO finish me.
+		print LABEL "RBF  $numRecords\n"; # like: 88947
+		print LABEL "DSN  $fileName\n"; # DATA.D110405
+		print LABEL "ORS  CNEDM\n";
+		print LABEL "FDI  P012569\n";
+		close( LABEL );
+		print     getTimeStamp(1)." created LABEL file: '$labelFileName'\n";
+		print LOG getTimeStamp(1)." created LABEL file: '$labelFileName'\n";
 	}
-	open LABEL, ">$labelFileName" or die "error couldn't create label file $fileName: $!\n";
-	print LABEL "DAT  ".getTimeStamp(0)."000000.0\n"; # TODO finish me.
-	print LABEL "RBF  $numRecords\n"; # like: 88947
-	print LABEL "DSN  $fileName\n"; # DATA.D110405
-	print LABEL "ORS  CNEDM\n";
-	print LABEL "FDI  P012569\n";
-	close LABEL;
-	print     getTimeStamp(1)." creating LABEL file: '$labelFileName'\n";
-	print LOG getTimeStamp(1)." creating LABEL file: '$labelFileName'\n";
-	return $labelFileName;
 }
