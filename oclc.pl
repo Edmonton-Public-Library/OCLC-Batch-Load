@@ -281,7 +281,7 @@ if ($opt{'s'})
 	# Use return value for -A switch to get the list of files and their size otherwise you can just use this 
 	# to split an arbitrary file.
 	my $fileCounts = splitFile( $maxRecords, $date, $opt{'s'} );
-	logit( " $opt{'s'} split into " . keys( %$fileCounts ) );
+	logit( " $opt{'s'} split into " . keys( %$fileCounts ) . " parts" );
 }
 
 # FTP the files.
@@ -428,21 +428,14 @@ sub splitFile
 			logit( "creating DATA file: '$filePath'" );
 		}
 	}
-	# if the count has a number greater than 0, it means there was an uneven number and the hash needs to be updated
+	# if the count has a number greater than 0, it means there was an uneven number left over
+	# and the hash needs to be updated for that file too.
 	if ( $lineCount > 0 )
 	{
 		$fileSizeRef->{ $filePath } = $lineCount;
 	}
 	close(OUT);
 	close(INPUT);
-	if ($opt{'D'})
-	{
-		print "===there are ".keys(%$fileSizeRef)." keys\n";
-		while ( my ($key, $value) = each(%$fileSizeRef) ) 
-		{
-			print "===$key => $value\n";
-		}
-	}
 	return $fileSizeRef;
 }
 
