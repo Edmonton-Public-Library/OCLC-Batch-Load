@@ -101,7 +101,7 @@ sub usage
 
 Uploads bibliographic records to OCLC.
 
-usage: $0 [-aADx] [-s file] [-f files] [-z <n>]
+usage: $0 [-aADlx] [-s file] [-f files] [-z <n>]
 
  -a [file]     : Run the API commands to generate the catalog keys of items to be dumped.
  -A            : Do everything: run api catalog dump, split to default size
@@ -114,12 +114,14 @@ usage: $0 [-aADx] [-s file] [-f files] [-z <n>]
  -D            : Debug
  -f [files]    : FTP files to OCLC at default FTP URL. Predicated on 
                  files existing in the OCLC directory.
+ -l            : Creates matching OCLC label files for files split with '-s'. Has no effect if
+                 '-s' is not selected.
  -s [file]     : Split input into maximum number of records per DATA file
                  (90000).
  -x            : This (help) message
  -z [int]      : Set the maximum output file size (in records, not bytes).
 
-example: $0 -s catalog_dump.lst
+example: $0 -s catalog_dump.lst -l
          $0 -f "file1 label1 file2 label2"
          $0 -a
          $0 -A
@@ -182,7 +184,7 @@ sub logit
 # return: 
 sub init
 {
-    my $opt_string = 'AaDf:xs:d:z:';
+    my $opt_string = 'AaDd:f:lxs:z:';
     getopts( "$opt_string", \%opt ) or usage();
     usage() if ($opt{'x'});
 	if ( $opt{'z'} )
@@ -274,14 +276,21 @@ if ($opt{'a'})
 #### TEST ####
 if ($opt{'s'})
 {
+	logit( "-s started" );
 	my $date = getTimeStamp(); # get century most significant digits stripped date.
 	print "-s selected -split file $opt{s} on $date\n" if ($opt{'D'});
-	logit( " reading '" . $opt{'s'} . "' lines read, using file size: $maxRecords" );
+	logit( "reading '" . $opt{'s'} . "' lines read, using file size: $maxRecords" );
 	# Stores the file name (complete path) as a key and the number of items in the file as the value.
 	# Use return value for -A switch to get the list of files and their size otherwise you can just use this 
 	# to split an arbitrary file.
 	my $fileCounts = splitFile( $maxRecords, $date, $opt{'s'} );
-	logit( " $opt{'s'} split into " . keys( %$fileCounts ) . " parts" );
+	logit( "'$opt{'s'}' split into " . keys( %$fileCounts ) . " parts" );
+	if ( $opt{'l'} )
+	{
+		logit( "creating matching OCLC label files" );
+		createOCLCLableFiles( $fileCounts );
+	}
+	logit( "-s finished" );
 }
 
 # FTP the files.
@@ -395,11 +404,12 @@ sub ftp
 sub splitFile
 {
 	my ($maxRecords, $date, $fileInput) = @_;
+	logit( "splitFile started" );
 	my $fileSizeRef;        # hash ref of file names and record sizes.
 	my $lineCount      = 0;
 	my $totalLineCount = 0;
 	my $suffix         = "aa";
-	my $filePath       = qq{DATA.D$date.$suffix}; # DATA.D120623.aa
+	my $filePath       = qq{DATA.D$date.$suffix}; # [DATA.D120623.FILE1 ...] DATA.D120623.LAST
 	open OUT, ">$filePath" || die "error opening '$filePath': $!\n";
 	logit( "creating DATA file: '$filePath'" );
 	open(INPUT, "<$fileInput") or die "Error opening file to split: $!\n";
@@ -436,6 +446,7 @@ sub splitFile
 	}
 	close(OUT);
 	close(INPUT);
+	logit( "splitFile finished" );
 	return $fileSizeRef;
 }
 
@@ -462,24 +473,21 @@ sub splitFile
 #### TEST ####
 sub createOCLCLableFiles
 {
-	my $fileCountHashRef = $_;
+	my $fileCountHashRef = $_[0];
+	logit( "createOCLCLableFiles started" );
 	# now create the LABEL files
 	while( my ($dataFileName, $numRecords) = each %$fileCountHashRef )
 	{
 		my ($fileName, $directory, $suffix) = fileparse($dataFileName);
 		my $labelFileName = $directory.qq{LABEL}.substr($fileName, 4);
-		if ( $opt{'D'} )
-		{
-			print "LABEL: '$labelFileName'\n";
-		}
 		open( LABEL, ">$labelFileName" ) or die "error couldn't create label file '$fileName': $!\n";
-		print LABEL "DAT  ".getTimeStamp(0)."000000.0\n"; # TODO finish me.
+		print LABEL "DAT  ".getTimeStamp(0)."000000.0\n"; # 14.1 - '0' right fill.
 		print LABEL "RBF  $numRecords\n"; # like: 88947
 		print LABEL "DSN  $fileName\n"; # DATA.D110405
 		print LABEL "ORS  CNEDM\n";
 		print LABEL "FDI  P012569\n";
 		close( LABEL );
-		print     getTimeStamp(1)." created LABEL file: '$labelFileName'\n";
-		print LOG getTimeStamp(1)." created LABEL file: '$labelFileName'\n";
+		logit( "created LABEL file '$labelFileName'" );
 	}
+	logit( "createOCLCLableFiles finished" );
 }
