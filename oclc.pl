@@ -348,6 +348,7 @@ sub getDateBounds
 			$endDate = $dates[1];
 		}
 	}
+	logit( "date boundaries set to '>$startDate<$endDate'" );
 	return ">$startDate<$endDate";
 }
 
@@ -427,7 +428,7 @@ sub splitFile
 	}
 	# the last file is always called *.LAST even if there is only one file.
 	push( @fileNames, qq{DATA.D$date.LAST} );
-	# open the input file and prepare read the contents into each section
+	# open the input file and prepare read the contents into each file fragment.
 	open(INPUT, "<$fileInput") or die "Error opening file to split: $!\n";
 	while(<INPUT>)
 	{
