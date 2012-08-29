@@ -27,6 +27,7 @@ use vars qw/ %opt /;
 use Getopt::Std;
 use File::Basename;  # Used in ftp() for local and remote file identification.
 use Net::FTP;
+use POSIX;           # for ceil()
 
 ##### function must be first because logging uses it almost immediately.
 # Returns a timestamp for the log file only. The Database uses the default
@@ -405,46 +406,53 @@ sub splitFile
 {
 	my ($maxRecords, $date, $fileInput) = @_;
 	logit( "splitFile started" );
-	my $fileSizeRef;        # hash ref of file names and record sizes.
-	my $lineCount      = 0;
-	my $totalLineCount = 0;
-	my $suffix         = "aa";
-	my $filePath       = qq{DATA.D$date.$suffix}; # [DATA.D120623.FILE1 ...] DATA.D120623.LAST
-	open OUT, ">$filePath" || die "error opening '$filePath': $!\n";
-	logit( "creating DATA file: '$filePath'" );
+	my $fileSizeRef;         # hash ref of file names and record sizes.
+	my $lineCount      = 0;  # current number of lines written to the current file fragment.
+	my $numLinesInput  = 0;  # number of input lines to process.
+	my $fileCount      = 0;  # number of files to create.
+	my @fileNames      = (); # precomposed list of file names
+	my $fileName;            # The current file name within the loop
+	# find out how many files we need, this saves us a lot of time renaming the last file.
 	open(INPUT, "<$fileInput") or die "Error opening file to split: $!\n";
 	while(<INPUT>)
 	{
-		chomp($_);
-		$lineCount++;
-		print OUT "$_\n";
-		# The or statement is for the case where the last file has less than
-		# the maximum number of allowed records, we need the count from that
-		# file as well.
-		if ( $lineCount >= $maxRecords )
-		{
-			close(OUT);
-			# Save the file count for making LABEL files.
-			$fileSizeRef->{ $filePath } = $lineCount;
-			$lineCount = 0;
-			# If there are more records, make a new file for them. To not check leaves
-			# one empty file left over.
-			
-			# Increment the file extension.
-			$suffix = ++$suffix;
-			# Create a new file name and path.
-			$filePath = qq{DATA.D$date.$suffix};
-			open( OUT, ">$filePath" ) or die "error opening '$filePath': $!\n";
-			logit( "creating DATA file: '$filePath'" );
-		}
+		$numLinesInput++;
 	}
-	# if the count has a number greater than 0, it means there was an uneven number left over
-	# and the hash needs to be updated for that file too.
+	close( INPUT );
+	$fileCount = ceil( $numLinesInput / $maxRecords );
+	# precompose the split file names
+	for ( my $i = 1; $i < $fileCount; $i++ ) 
+	{
+		push( @fileNames, qq{DATA.D$date.FILE$i} ); # [DATA.D120623.FILE1 ...] DATA.D120623.LAST
+	}
+	# the last file is always called *.LAST even if there is only one file.
+	push( @fileNames, qq{DATA.D$date.LAST} );
+	# open the input file and prepare read the contents into each section
+	open(INPUT, "<$fileInput") or die "Error opening file to split: $!\n";
+	while(<INPUT>)
+	{
+		if ( $lineCount == $maxRecords )
+		{
+			$fileSizeRef->{ $fileName } = $lineCount;
+			$lineCount = 0;
+			close( OUT );
+			logit( "created DATA file: '$fileName'" );
+		}
+		if ( $lineCount == 0 )
+		{
+			$fileName = shift( @fileNames );
+			open( OUT, ">$fileName" ) or die "error opening '$fileName': $!\n";
+		}
+		$lineCount++;
+		print OUT "$_";
+	}
+	# If there were no more records, the previous code would create a zero size file.
 	if ( $lineCount > 0 )
 	{
-		$fileSizeRef->{ $filePath } = $lineCount;
+		close( OUT );
+		$fileSizeRef->{ $fileName } = $lineCount;
+		logit( "created DATA file: '$fileName'" );
 	}
-	close(OUT);
 	close(INPUT);
 	logit( "splitFile finished" );
 	return $fileSizeRef;
