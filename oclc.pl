@@ -28,41 +28,7 @@ use Getopt::Std;
 use File::Basename;  # Used in ftp() for local and remote file identification.
 use Net::FTP;
 
-# Prints usage message then exits.
-# param:
-# return:
-sub usage
-{
-    print STDERR << "EOF";
-
-Uploads bibliographic records to OCLC.
-
-usage: $0 [-aADx] [-s file] [-f files]
-
- -a [file]     : Run the API commands to generate the catalog dump.
-                 This will do a complete dump.
- -A            : Do everything: run api catalog dump, split to default size
-                 files and upload the split files and labels. Same as running
-			     -a -f 
- -d [start,end]: Comma separated start and end date. Restricts search for items by create and 
-                 modify dates. Defaults to one month ago as specified by 'transdate -m-1' and 
-				 today's date for an end date. Both are optional but must be valid ANSI dates or
-				 the defaults are used.
- -D            : Debug
- -f [files]    : FTP files to OCLC at default FTP URL. Predicated on 
-                 files existing in the OCLC directory.
- -s [file]     : Split input into maximum number of records per DATA file
-                 (90000).
- -x            : this (help) message
-
-example: $0 -s catalog_dump.lst
-         $0 -f "file1 label1 file2 label2"
-         $0 -a
-         $0 -A
-EOF
-    exit;
-}
-
+##### function must be first because logging uses it almost immediately.
 # Returns a timestamp for the log file only. The Database uses the default
 # time of writing the record for its timestamp in SQL. That was done to avoid
 # the snarl of differences between MySQL and Perl timestamp details.
@@ -112,6 +78,54 @@ sub getTimeStamp
 		return "$year$mon$mday";
 	}
 }
+##### Server side parameters
+my $edxAccount  = qq{cnedm};
+my $userName    = "t".$edxAccount."1";      # User name.
+my $ftpUrl      = qq{edx.oclc.org};
+my $ftpDir      = qq{edx.ebsb.$edxAccount.ftp};
+##### Client side parameters
+my $maxRecords  = 90000;            # Max number records we can upload at a time, use -s to change.
+my $date        = getTimeStamp;     # current date in ascii.
+my $oclcDir     = "."; #qq{/s/sirsi/Unicorn/EPLwork/OCLC};
+my $passwordPath= qq{$oclcDir/password.txt};
+my $logDir      = $oclcDir;
+my $logFile     = qq{$logDir/oclc$date.log};  # Name and location of the log file.
+open LOG, ">>$logFile";
+
+# Prints usage message then exits.
+# param:
+# return:
+sub usage
+{
+    print STDERR << "EOF";
+
+Uploads bibliographic records to OCLC.
+
+usage: $0 [-aADx] [-s file] [-f files] [-z <n>]
+
+ -a [file]     : Run the API commands to generate the catalog keys of items to be dumped.
+ -A            : Do everything: run api catalog dump, split to default size
+                 files and upload the split files and labels. Same as running
+			     -a -f 
+ -d [start,end]: Comma separated start and end date. Restricts search for items by create and 
+                 modify dates. Defaults to one month ago as specified by 'transdate -m-1' and 
+				 today's date for an end date. Both are optional but must be valid ANSI dates or
+				 the defaults are used.
+ -D            : Debug
+ -f [files]    : FTP files to OCLC at default FTP URL. Predicated on 
+                 files existing in the OCLC directory.
+ -s [file]     : Split input into maximum number of records per DATA file
+                 (90000).
+ -x            : This (help) message
+ -z [int]      : Set the maximum output file size (in records, not bytes).
+
+example: $0 -s catalog_dump.lst
+         $0 -f "file1 label1 file2 label2"
+         $0 -a
+         $0 -A
+EOF
+    exit;
+}
 
 # Returns the password, or a new password, based on the contents of the password file 
 # specified in the 'path' parameter. Only the first line of the password
@@ -150,27 +164,32 @@ sub getPassword
 	return $newPassword;
 }
 
-##### Server side parameters
-my $edxAccount  = qq{cnedm};
-my $userName    = "t".$edxAccount."1";      # User name.
-my $ftpUrl      = qq{edx.oclc.org};
-my $ftpDir      = qq{edx.ebsb.$edxAccount.ftp};
-##### Client side parameters
-my $maxRecords  = 90000;            # Max number records we can upload at a time, use -s to change.
-my $date        = getTimeStamp;     # current date in ascii.
-my $oclcDir     = qq{/s/sirsi/Unicorn/EPLwork/OCLC};
-my $passwordPath= "$oclcDir/password.txt";
-my $logDir      = $oclcDir;
-my $logFile     = "$logDir/oclc$date.log";  # Name and location of the log file.
-open LOG, ">>$logFile";
+#
+# Prints the argument message to stdout and log file.
+# param:  message string.
+# return: 
+#
+sub logit
+{
+	my $msg = $_[0];
+	print     getTimeStamp(1) . " $msg\n";
+	print LOG getTimeStamp(1) . " $msg\n";
+}
+
+
 # Kicks off the setting of various switches.
 # param:  
 # return: 
 sub init
 {
-    my $opt_string = 'AaDf:xs:d:';
+    my $opt_string = 'AaDf:xs:d:z:';
     getopts( "$opt_string", \%opt ) or usage();
     usage() if ($opt{'x'});
+	if ( $opt{'z'} )
+	{
+		$maxRecords = $opt{'z'};
+		logit( "maximum file size set to $opt{'z'}" );
+	}
 }
 init();
 
@@ -257,13 +276,12 @@ if ($opt{'s'})
 {
 	my $date = getTimeStamp(); # get century most significant digits stripped date.
 	print "-s selected -split file $opt{s} on $date\n" if ($opt{'D'});
-	print     getTimeStamp(1)." reading '".$opt{'s'}."' lines read, using file size: $maxRecords\n";
-	print LOG getTimeStamp(1)." reading '".$opt{'s'}."' lines read, using file size: $maxRecords\n";
+	logit( " reading '" . $opt{'s'} . "' lines read, using file size: $maxRecords" );
 	# Stores the file name (complete path) as a key and the number of items in the file as the value.
 	# Use return value for -A switch to get the list of files and their size otherwise you can just use this 
 	# to split an arbitrary file.
-	# my $fileCounts = splitFile($maxRecords, $date, $opt{'s'});
-	splitFile($maxRecords, $date, $opt{'s'});
+	my $fileCounts = splitFile( $maxRecords, $date, $opt{'s'} );
+	logit( " $opt{'s'} split into " . keys( %$fileCounts ) );
 }
 
 # FTP the files.
@@ -324,7 +342,13 @@ sub getDateBounds
 }
 
 #
-#
+# FTPs a list of files to a remote host.
+# param:  host - string name of the FTP host.
+# param:  directory - string remote directory.
+# param:  userName - string user id for FTP login.
+# param:  password - string.
+# param:  fileList - List of files to FTP to remote directory on remote host.
+# return: 
 #
 sub ftp
 {
@@ -335,14 +359,14 @@ sub ftp
 	$ftp->login($userName, $password) or $newError = 1;
 	if ($newError)
 	{
-		print LOG getTimeStamp(1)."Can't login to $host: $!\n";
+		logit( "Can't login to $host: $!" );
 		$ftp->quit;
 	}
-	print "logged in\n";
+	logit( "logged in\n" );
 	$ftp->cwd($directory) or $newError = 1; 
 	if ($newError)
 	{
-		print LOG getTimeStamp(1)."can't change to $directory on $host: $!\n";
+		logit( "can't change to $directory on $host: $!" );
 		$ftp->quit;
 	}
 	$ftp->binary;
@@ -351,14 +375,14 @@ sub ftp
 		# locally we use the fully qualified path but
 		# remotely we just put the file in the directory.
 		my ($remoteFile, $directories, $suffix) = fileparse($localFile);
-		print "...putting: $remoteFile\n";
+		logit( "...putting: $remoteFile" );
 		$ftp->put($localFile, $remoteFile) or $newError = 1;
 		if ($newError)
 		{
-			print LOG getTimeStamp(1)."ftp->put: failed to upload $localFile to $host: $!\n";
+			logit( "ftp->put: failed to upload $localFile to $host: $!" );
 			$ftp->quit;
 		}
-		print LOG getTimeStamp(1)."ftp->put: uploaded $localFile to $host\n";
+		logit( "ftp->put: uploaded $localFile to $host" );
 	}
 	$ftp->quit;
 }
@@ -377,8 +401,7 @@ sub splitFile
 	my $suffix         = "aa";
 	my $filePath       = qq{DATA.D$date.$suffix}; # DATA.D120623.aa
 	open OUT, ">$filePath" || die "error opening '$filePath': $!\n";
-	print     getTimeStamp(1)." creating DATA file: '$filePath'\n";
-	print LOG getTimeStamp(1)." creating DATA file: '$filePath'\n";
+	logit( "creating DATA file: '$filePath'" );
 	open(INPUT, "<$fileInput") or die "Error opening file to split: $!\n";
 	while(<INPUT>)
 	{
@@ -402,13 +425,17 @@ sub splitFile
 			# Create a new file name and path.
 			$filePath = qq{DATA.D$date.$suffix};
 			open( OUT, ">$filePath" ) or die "error opening '$filePath': $!\n";
-			print     getTimeStamp(1)." creating DATA file: '$filePath'\n";
-			print LOG getTimeStamp(1)." creating DATA file: '$filePath'\n";
+			logit( "creating DATA file: '$filePath'" );
 		}
+	}
+	# if the count has a number greater than 0, it means there was an uneven number and the hash needs to be updated
+	if ( $lineCount > 0 )
+	{
+		$fileSizeRef->{ $filePath } = $lineCount;
 	}
 	close(OUT);
 	close(INPUT);
-	if ( $opt{'d'} )
+	if ($opt{'D'})
 	{
 		print "===there are ".keys(%$fileSizeRef)." keys\n";
 		while ( my ($key, $value) = each(%$fileSizeRef) ) 
@@ -448,7 +475,7 @@ sub createOCLCLableFiles
 	{
 		my ($fileName, $directory, $suffix) = fileparse($dataFileName);
 		my $labelFileName = $directory.qq{LABEL}.substr($fileName, 4);
-		if ( $opt{'d'} )
+		if ( $opt{'D'} )
 		{
 			print "LABEL: '$labelFileName'\n";
 		}
