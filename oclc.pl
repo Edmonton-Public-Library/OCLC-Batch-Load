@@ -118,7 +118,7 @@ usage: $0 [-acADx] [-s file] [-f files] [-z <n>] [-d"[start_date],[end_date]"]
 				 today's date for an end date. Both are optional but must be valid ANSI dates or
 				 the defaults are used.
  -D            : Debug
- -f [file]     : FTPs files listed in the argument file, to OCLC's FTP URL.
+ -f            : Finds DATA and matching LABEL files in current directory, and FTPs them to OCLC.
  -s [file]     : Split input into maximum number of records per DATA file(default 90000).
  -x            : This (help) message.
  -z [int]      : Set the maximum output file size in lines, not bytes, this allows for splitting 
@@ -129,6 +129,8 @@ example: To just split an arbitrary text file into files of 51 lines each: $0 -z
          To produce a cat key file for the last 30 days: $0 -a
 		 To produce a cat key file for the beginning of 2011 to now: $0 -a -d"20110101,"
 		 To produce a cat key file for the January 2012: $0 -a -d"20120101,20120201"
+		 To create marc record files from existing key files: $0 -c
+		 To FTP existing marc DATA and LABEL files to OCLC: $0 -f
          To do everything: $0 -A
 EOF
     exit;
@@ -189,7 +191,7 @@ sub logit
 # return: 
 sub init
 {
-    my $opt_string = 'AacDd:f:xs:z:';
+    my $opt_string = 'AacDd:fxs:z:';
     getopts( "$opt_string", \%opt ) or usage();
     usage() if ($opt{'x'});
 	if ( $opt{'z'} )
@@ -331,26 +333,52 @@ if ($opt{'s'})
 	logit( "-s finished" ) if ( $opt{'D'} );
 }
 
-# FTP the files.
-if ($opt{'f'})
+#
+# FTP the DATA and LABEL files if there are matching sets.
+# 
+if ( $opt{'f'} )
 {
-	print "-f selected -ftp files: '$opt{f}'\n" if ($opt{'D'});
-	my @ftpList = split(' ', $opt{'f'});
-	exit 1 if (! @ftpList);
-	my $password = getPassword($passwordPath);
-	print LOG getTimeStamp(1)." password read.\n";
-	foreach my $file (@ftpList)
+	logit( "-f started" ) if ( $opt{'D'} );
+	my @ftpList;
+	# my $password = getPassword( $passwordPath );
+	logit( "password read from '$passwordPath'" );
+	logit( "generating eligible list of marc DATA and LABEL files" );
+	my @dataList = <DATA.D*>;
+	my @labelList= <LABEL.D*>;
+	# rough test that there are the same number of DATA files as LABEL files,
+	# if there are not, there may files left in the directory from earlier in the day.
+	if ( scalar( @dataList ) != scalar( @labelList ) )
 	{
-		print "$file\n";#ftp($ftpUrl, $ftpDir, $userName, $password, @files);
+		logit( "Error: mismatch of DATA and LABEL files" );
+		exit( 0 );
 	}
-	print "$password\n";
-	#ftp($ftpUrl, $ftpDir, $userName, $password, @files);
-	ftp("ftp.epl.ca", "atest", "mark", "R2GnBVtt", "./test.j");
-	# ftp("ftp.epl.cb", "atest", "mark", "R2GnBVtt", "./test.j"); #fail
-	# ftp("ftp.epl.ca", "btest", "mark", "R2GnBVtt", "./test.j"); #fail
-	# ftp("ftp.epl.ca", "atest", "amark", "R2GnBVtt", "./test.j"); #fail
-	# ftp("ftp.epl.ca", "atest", "mark", "aR2GnBVtt", "./test.j"); #fail
-	# ftp("ftp.epl.ca", "atest", "mark", "R2GnBVtt", "./test.a"); #fail
+	# match up the data and label files.
+	foreach my $dataFile ( @dataList )
+	{
+		my $thisDataName = substr( $dataFile, 4 );
+		foreach my $labelFile ( @labelList )
+		{
+			my $thisLabelName = substr( $labelFile, 5 );
+			if ( $thisDataName eq $thisLabelName )
+			{
+				push( @ftpList, $dataFile );
+				push( @ftpList, $labelFile );
+				logit( "'$dataFile' and '$labelFile' selected" );
+			}
+		}
+	}
+	if ( scalar( @dataList ) * 2 != scalar( @ftpList ) )
+	{
+		logit( "Error: mismatch of DATA and LABEL files" );
+		exit( 0 );
+	}
+	logit( "FTP list: @ftpList" );
+	#ftp( $ftpUrl, $ftpDir, $userName, $password, @ftpList );
+	foreach my $file ( @ftpList )
+	{
+		logit( "ftp '$file' successful" ) if ( ftp( "ftp.epl.ca", "atest", "mark", "R2GnBVtt", $file ) );
+	}
+	logit( "-f finished" ) if ( $opt{'D'} );
 }
 
 close(LOG);
@@ -373,7 +401,7 @@ sub dumpCatalog
 	{
 		# open and read the keys in the file
 		logit( "dumping catalogue keys found in '$fileName' to 'DATA.D$fileName'" );
-        # `cat $fileName | selcatalog -iC -oC > DATA.D$fileName 2>>$APILogfilename`;
+        `cat $fileName | catalogdump -om > DATA.D$fileName 2>>$APILogfilename`;
 		# create a label for the file.
 		createOCLCLableFiles( $fileName, $numRecords );
 	}
@@ -425,19 +453,21 @@ sub ftp
 	my ($host, $directory, $userName, $password, @fileList) = @_;
 	my $newError = 0;
 	my $ftp = Net::FTP->new($host, Timeout=>240) or die "can't ftp to $host: $!\n";
-	print "connected to $host\n";
+	logit( "connected to $host" );
 	$ftp->login($userName, $password) or $newError = 1;
 	if ($newError)
 	{
 		logit( "Can't login to $host: $!" );
 		$ftp->quit;
+		return 0;
 	}
-	logit( "logged in\n" );
+	logit( "logged in" );
 	$ftp->cwd($directory) or $newError = 1; 
 	if ($newError)
 	{
 		logit( "can't change to $directory on $host: $!" );
 		$ftp->quit;
+		return 0;
 	}
 	$ftp->binary;
 	foreach my $localFile (@fileList)
@@ -445,16 +475,18 @@ sub ftp
 		# locally we use the fully qualified path but
 		# remotely we just put the file in the directory.
 		my ($remoteFile, $directories, $suffix) = fileparse($localFile);
-		logit( "...putting: $remoteFile" );
+		logit( "putting: $remoteFile" );
 		$ftp->put($localFile, $remoteFile) or $newError = 1;
 		if ($newError)
 		{
 			logit( "ftp->put: failed to upload $localFile to $host: $!" );
 			$ftp->quit;
+			return 0;
 		}
 		logit( "ftp->put: uploaded $localFile to $host" );
 	}
 	$ftp->quit;
+	return 1;
 }
 
 # Takes the list and splits it into 'n' sized record files.
