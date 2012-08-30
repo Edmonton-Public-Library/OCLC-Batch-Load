@@ -80,17 +80,19 @@ sub getTimeStamp
 	}
 }
 ##### Server side parameters
-my $edxAccount  = qq{cnedm};
-my $userName    = "t".$edxAccount."1";      # User name.
-my $ftpUrl      = qq{edx.oclc.org};
-my $ftpDir      = qq{edx.ebsb.$edxAccount.ftp};
+my $edxAccount     = qq{cnedm};
+my $userName       = "t".$edxAccount."1";      # User name.
+my $ftpUrl         = qq{edx.oclc.org};
+my $ftpDir         = qq{edx.ebsb.$edxAccount.ftp};
 ##### Client side parameters
-my $maxRecords  = 90000;            # Max number records we can upload at a time, use -s to change.
-my $date        = getTimeStamp;     # current date in ascii.
-my $oclcDir     = "."; #qq{/s/sirsi/Unicorn/EPLwork/OCLC};
-my $passwordPath= qq{$oclcDir/password.txt};
-my $logDir      = $oclcDir;
-my $logFile     = qq{$logDir/oclc$date.log};  # Name and location of the log file.
+my $maxRecords     = 90000;            # Max number records we can upload at a time, use -s to change.
+my $date           = getTimeStamp;     # current date in ascii.
+my $oclcDir        = "."; #qq{/s/sirsi/Unicorn/EPLwork/OCLC};
+my $passwordPath   = qq{$oclcDir/password.txt};
+my $logDir         = $oclcDir;
+my $logFile        = qq{$logDir/oclc$date.log};  # Name and location of the log file.
+my $catalogKeys    = qq{catalog_keys.lst}; # master list of catalog keys.
+my $APILogfilename = qq{oclcAPI.log};
 open LOG, ">>$logFile";
 
 # Prints usage message then exits.
@@ -102,30 +104,32 @@ sub usage
 
 Uploads bibliographic records to OCLC.
 
-usage: $0 [-aADlx] [-s file] [-f files] [-z <n>]
+usage: $0 [-acADx] [-s file] [-f files] [-z <n>] [-d"[start_date],[end_date]"]
 
- -a [file]     : Run the API commands to generate the catalog keys of items to be dumped.
- -A            : Do everything: run api catalog dump, split to default size
+ -a            : Run the API commands to generate a file of catalog keys called $catalogKeys.
+                 If -D is selected, the intermediate temporary files are not deleted.
+ -A            : Do everything: run api catalog dump, split to default sized
                  files and upload the split files and labels. Same as running
 			     -a -f 
+ -c            : Catalog dump the cat keys found in any data files (like DATA.D120829.FILE5) 
+                 in the current directory, replacing the contents with the dumped catalog records.
  -d [start,end]: Comma separated start and end date. Restricts search for items by create and 
                  modify dates. Defaults to one month ago as specified by 'transdate -m-1' and 
 				 today's date for an end date. Both are optional but must be valid ANSI dates or
 				 the defaults are used.
  -D            : Debug
- -f [files]    : FTP files to OCLC at default FTP URL. Predicated on 
-                 files existing in the OCLC directory.
- -l            : Creates matching OCLC label files for files split with '-s'. Has no effect if
-                 '-s' is not selected.
- -s [file]     : Split input into maximum number of records per DATA file
-                 (90000).
- -x            : This (help) message
- -z [int]      : Set the maximum output file size (in records, not bytes).
+ -f [file]     : FTPs files listed in the argument file, to OCLC's FTP URL.
+ -s [file]     : Split input into maximum number of records per DATA file(default 90000).
+ -x            : This (help) message.
+ -z [int]      : Set the maximum output file size in lines, not bytes, this allows for splitting 
+                 a set of catalogue keys into sets of 90000 records, which are then piped to catalogdump.
 
-example: $0 -s catalog_dump.lst -l
-         $0 -f "file1 label1 file2 label2"
-         $0 -a
-         $0 -A
+example: To just split an arbitrary text file into files of 51 lines each: $0 -z51 -s51 file.lst
+         Split an arbitrary text file into files of 90000 lines each and create OCLC labels: $0 -sfile.lst -l
+         To produce a cat key file for the last 30 days: $0 -a
+		 To produce a cat key file for the beginning of 2011 to now: $0 -a -d"20110101,"
+		 To produce a cat key file for the January 2012: $0 -a -d"20120101,20120201"
+         To do everything: $0 -A
 EOF
     exit;
 }
@@ -185,7 +189,7 @@ sub logit
 # return: 
 sub init
 {
-    my $opt_string = 'AaDd:f:lxs:z:';
+    my $opt_string = 'AacDd:f:xs:z:';
     getopts( "$opt_string", \%opt ) or usage();
     usage() if ($opt{'x'});
 	if ( $opt{'z'} )
@@ -207,21 +211,23 @@ if ($opt{'A'})
 # make a dump of the catalog.
 if ($opt{'a'})
 {
-	my $logfilename        = qq{oclcAPI.log};
+	logit( "-a started" ) if ( $opt{'D'} );
+	# my $APILogfilename        = qq{oclcAPI.log};
 	my $initialItemCatKeys = qq{tmp_a};
 	my $sortedItemCatKeys  = qq{tmp_b};
 	my $dateRefinedCatKeys = qq{tmp_c};
-	my $sortedDatedCatKeys = qq{tmp_d};
+	# my $catalogKeys = qq{catalog_keys.lst}; # master list of catalog keys.
 	print "-a selected -run API.\n" if ($opt{'D'});
 	# my $unicornItemTypes = "PAPERBACK,JPAPERBACK,BKCLUBKIT,COMIC,DAISYRD,EQUIPMENT,E-RESOURCE,FLICKSTOGO,FLICKTUNE,JFLICKTUNE,JTUNESTOGO,PAMPHLET,RFIDSCANNR,TUNESTOGO,JFLICKTOGO,PROGRAMKIT,LAPTOP,BESTSELLER,JBESTSELLR";
 	my $unicornItemTypes = "PAPERBACK";
+	logit( "exclude item types: $unicornItemTypes" );
 	my $unicornLocations = "BARCGRAVE,CANC_ORDER,DISCARD,EPLACQ,EPLBINDERY,EPLCATALOG,EPLILL,INCOMPLETE,LONGOVRDUE,LOST,LOST-ASSUM,LOST-CLAIM,LOST-PAID,MISSING,NON-ORDER,ON-ORDER,BINDERY,CATALOGING,COMICBOOK,INTERNET,PAMPHLET,DAMAGE,UNKNOWN,REF-ORDER,BESTSELLER,JBESTSELLR,STOLEN";
-	print "$unicornItemTypes\n" if ($opt{'D'});
+	logit( "exclude locations: $unicornLocations" );
 	# gets all the keys of items that don't match the location list or item type lists.
-	print "selecting initial catalogue keys...\n";
+	logit( "selecting initial catalogue keys" );
 	# `selitem -t~$unicornItemTypes -l~$unicornLocations -oC >$initialItemCatKeys`;
 	open( INITIAL_CAT_KEYS, "<$initialItemCatKeys" ) or die "No items found.\n";
-	print "sorting initial catalogue key selection...\n";
+	logit( "sorting initial catalogue key selection" );
 	my %initialKeys;
 	while (<INITIAL_CAT_KEYS>)
 	{
@@ -239,15 +245,12 @@ if ($opt{'a'})
 	}
 	close( SORTED_CAT_KEYS );
 	my $dateBoundaries = getDateBounds();
-	print "refining item selection based on '$dateBoundaries'...\n";
-	print "$dateBoundaries\n" if ( $opt{'D'} );
 	# select all catalog keys for items that were either modified or created between the dates selected.
-	print "create date criteria...\n";
-	`cat $sortedItemCatKeys | selcatalog -iC -oC -p"$dateBoundaries" > $dateRefinedCatKeys 2>>$logfilename`;
-	print "modified date criteria...\n";
-	`cat $sortedItemCatKeys | selcatalog -iC -oC -r"$dateBoundaries" >>$dateRefinedCatKeys 2>>$logfilename`;
-	# cat $dateRefinedCatKeys | sort | uniq > tmp_initialcatkeys_sorted
-	print "sorting date refined catalogue key selection...\n";
+	logit( "adding keys that were created within date criteria '$dateBoundaries'" );
+	`cat $sortedItemCatKeys | selcatalog -iC -oC -p"$dateBoundaries" > $dateRefinedCatKeys 2>>$APILogfilename`;
+	logit( "adding keys that were modified within date criteria '$dateBoundaries'" );
+	`cat $sortedItemCatKeys | selcatalog -iC -oC -r"$dateBoundaries" >>$dateRefinedCatKeys 2>>$APILogfilename`;
+	logit( "sorting date refined catalogue key selection" );
 	open( DATED_CAT_KEYS, "<$dateRefinedCatKeys" ) or die "No items found refined by date: $!\n";
 	my %dateRefinedKeys;
 	while (<DATED_CAT_KEYS>)
@@ -257,7 +260,8 @@ if ($opt{'a'})
 		$dateRefinedKeys{$_} = 1;
 	}
 	close( DATED_CAT_KEYS );
-	open( SORTED_DATED_CAT_KEYS, ">$sortedDatedCatKeys" ) or die "Error opening file to write sorted, date refined CAT keys, $!\n";
+	# sort the uniq catalog keys numerically.
+	open( SORTED_DATED_CAT_KEYS, ">$catalogKeys" ) or die "Error opening file to write sorted, date refined CAT keys, $!\n";
 	foreach my $finalKey (sort {$a <=> $b} keys(%dateRefinedKeys))
 	{
 		print SORTED_DATED_CAT_KEYS $finalKey."|\n";
@@ -269,15 +273,53 @@ if ($opt{'a'})
 		unlink( $sortedItemCatKeys  );
 		unlink( $dateRefinedCatKeys );
 	}
-	print "...done API selection saved in '$sortedDatedCatKeys'\n";
+	logit( "catalogue key selection saved in '$catalogKeys'" );
+	logit( "-a finished" ) if ( $opt{'D'} );
 }
 
+#
+# Finds and catalogdumps the cat keys files that match 
+# [0-9][0-9][0-9][0-9][0-9][0-9]\.* (like 120829.FILE5 or 120829.LAST)
+# in the current directory. The output is a marc file called 'DATA.D<file_name>'
+# example: DATA.D120829.FILE5. After the marc file is created, a matching 
+# OCLC label is created.
+# param:  none
+# return: integer - non-zero on success and 0 otherwise.
+if ( $opt{'c'} )
+{
+	logit( "-c started" ) if ( $opt{'D'} );
+	my @fileList = <[0-9][0-9][0-9][0-9][0-9][0-9]\.*>;
+	if ( not @fileList )
+	{
+		logit( "no data files to catalogdump. Did you forget to create list(s) with -a and -s?" );
+		exit( 0 );
+	}
+	my $fileCountHashRef;
+	foreach my $file (@fileList)
+	{
+		# open file and find the number of records.
+		open( KEY_FILE, "<$file" ) or die "Error opening '$file': $!\n";
+		my $recordCount = 0;
+		while(<KEY_FILE>)
+		{
+			$recordCount++;
+		}
+		logit( "found $recordCount cat keys in '$file'" );
+		$fileCountHashRef->{ $file } = $recordCount;
+	}
+	# now pass that to dumpCatalog()
+	dumpCatalog( $fileCountHashRef );
+	logit( "-c finished" ) if ( $opt{'D'} );
+}
 
-# Splits a given file into parts.
-#### TEST ####
+#
+# Splits a given file into parts. The split occurs on new lines only. The outputted files
+# are named <yymmdd>.FILE1, ... <yymmdd>.LAST, or <yymmdd>.LAST if there is only one file.
+# param:  inputFileName string - name of the file to split.
+# return: 
 if ($opt{'s'})
 {
-	logit( "-s started" );
+	logit( "-s started" ) if ( $opt{'D'} );
 	my $date = getTimeStamp(); # get century most significant digits stripped date.
 	print "-s selected -split file $opt{s} on $date\n" if ($opt{'D'});
 	logit( "reading '" . $opt{'s'} . "' lines read, using file size: $maxRecords" );
@@ -286,12 +328,7 @@ if ($opt{'s'})
 	# to split an arbitrary file.
 	my $fileCounts = splitFile( $maxRecords, $date, $opt{'s'} );
 	logit( "'$opt{'s'}' split into " . keys( %$fileCounts ) . " parts" );
-	if ( $opt{'l'} )
-	{
-		logit( "creating matching OCLC label files" );
-		createOCLCLableFiles( $fileCounts );
-	}
-	logit( "-s finished" );
+	logit( "-s finished" ) if ( $opt{'D'} );
 }
 
 # FTP the files.
@@ -320,6 +357,28 @@ close(LOG);
 1; # exit with successful status.
 
 # ======================== Functions =========================
+
+#
+# Dumps the cat keys from a list of files and creates labels for those files.
+# param:  fileCountHashRef hash - key: file name like 120829.LAST, value: number
+#         of records in the file.
+# return: 
+# side effect: creates DATA.D<fileName> files.
+#
+sub dumpCatalog
+{
+	my $fileCountHashRef = $_[0];
+	logit( "dumpCatalog started" ) if ( $opt{'D'} );
+	while( my ($fileName, $numRecords) = each %$fileCountHashRef )
+	{
+		# open and read the keys in the file
+		logit( "dumping catalogue keys found in '$fileName' to 'DATA.D$fileName'" );
+        # `cat $fileName | selcatalog -iC -oC > DATA.D$fileName 2>>$APILogfilename`;
+		# create a label for the file.
+		createOCLCLableFiles( $fileName, $numRecords );
+	}
+	logit( "dumpCatalog finished" ) if ( $opt{'D'} );
+}
 
 #
 # Returns '<', '>' dates based on -d switch specified by the user. 
@@ -400,13 +459,13 @@ sub ftp
 
 # Takes the list and splits it into 'n' sized record files.
 # param:  max number of records per file.
-# param:  date ANSI, but without century, so yymmdd.
+# param:  baseName string - what you want the base name of the file to be.
 # param:  file input name. split files created in current directory.
 # return: hash reference of fileSizes.
 sub splitFile
 {
-	my ($maxRecords, $date, $fileInput) = @_;
-	logit( "splitFile started" );
+	my ($maxRecords, $baseName, $fileInput) = @_;
+	logit( "splitFile started" ) if ( $opt{'D'} );
 	my $fileSizeRef;         # hash ref of file names and record sizes.
 	my $lineCount      = 0;  # current number of lines written to the current file fragment.
 	my $numLinesInput  = 0;  # number of input lines to process.
@@ -424,10 +483,11 @@ sub splitFile
 	# precompose the split file names
 	for ( my $i = 1; $i < $fileCount; $i++ ) 
 	{
-		push( @fileNames, qq{DATA.D$date.FILE$i} ); # [DATA.D120623.FILE1 ...] DATA.D120623.LAST
+		push( @fileNames, qq{$baseName.FILE$i} ); # [120623.FILE1 ...] 120623.LAST, for generic files
+		# -c will prepend the correct 'DATA.D' when dumping the catalog records.
 	}
 	# the last file is always called *.LAST even if there is only one file.
-	push( @fileNames, qq{DATA.D$date.LAST} );
+	push( @fileNames, qq{$baseName.LAST} );
 	# open the input file and prepare read the contents into each file fragment.
 	open(INPUT, "<$fileInput") or die "Error opening file to split: $!\n";
 	while(<INPUT>)
@@ -455,7 +515,7 @@ sub splitFile
 		logit( "created DATA file: '$fileName'" );
 	}
 	close(INPUT);
-	logit( "splitFile finished" );
+	logit( "splitFile finished" ) if ( $opt{'D'} );
 	return $fileSizeRef;
 }
 
@@ -477,26 +537,22 @@ sub splitFile
 # ORS  CNEDM
 # FDI  P012569
 #
-# param:  hash reference of dataFileName string name as key and numRecords (integer) number of records in the file as value.
-# return: string name of the label file.
+# param:  dataFileName string - like 120829.FILE1
+# param:  recordCount integer - number of records in the file
+# return: 
+# side effect: creates a label file named LABEL.D<dataFileName>
 #### TEST ####
 sub createOCLCLableFiles
 {
-	my $fileCountHashRef = $_[0];
-	logit( "createOCLCLableFiles started" );
-	# now create the LABEL files
-	while( my ($dataFileName, $numRecords) = each %$fileCountHashRef )
-	{
-		my ($fileName, $directory, $suffix) = fileparse($dataFileName);
-		my $labelFileName = $directory.qq{LABEL}.substr($fileName, 4);
-		open( LABEL, ">$labelFileName" ) or die "error couldn't create label file '$fileName': $!\n";
-		print LABEL "DAT  ".getTimeStamp(0)."000000.0\n"; # 14.1 - '0' right fill.
-		print LABEL "RBF  $numRecords\n"; # like: 88947
-		print LABEL "DSN  $fileName\n"; # DATA.D110405
-		print LABEL "ORS  CNEDM\n";
-		print LABEL "FDI  P012569\n";
-		close( LABEL );
-		logit( "created LABEL file '$labelFileName'" );
-	}
-	logit( "createOCLCLableFiles finished" );
+	my ( $dataFileName, $numRecords ) = @_;
+	my ($fileName, $directory, $suffix) = fileparse($dataFileName);
+	my $labelFileName = $directory.qq{LABEL.D}.$fileName;
+	open( LABEL, ">$labelFileName" ) or die "error couldn't create label file '$labelFileName': $!\n";
+	print LABEL "DAT  ".getTimeStamp(0)."000000.0\n"; # 14.1 - '0' right fill.
+	print LABEL "RBF  $numRecords\n"; # like: 88947
+	print LABEL "DSN  $fileName\n"; # DATA.D110405
+	print LABEL "ORS  CNEDM\n";
+	print LABEL "FDI  P012569\n";
+	close( LABEL );
+	logit( "created LABEL file '$labelFileName'" );
 }
