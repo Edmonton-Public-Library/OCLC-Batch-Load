@@ -93,6 +93,7 @@ my $logDir         = $oclcDir;
 my $logFile        = qq{$logDir/oclc$date.log};  # Name and location of the log file.
 my $catalogKeys    = qq{catalog_keys.lst}; # master list of catalog keys.
 my $APILogfilename = qq{oclcAPI.log};
+my $defaultCatKeysFile = qq{cat_keys.lst};
 open LOG, ">>$logFile";
 
 # Prints usage message then exits.
@@ -206,12 +207,160 @@ init();
 # ANY text file into 90000 line files.
 if ($opt{'A'})
 {
-	print "-A selected do everything.\n" if ($opt{'D'});
+	logit( "-A started" ) if ( $opt{'D'} );
+	# select the catalog keys.
+	selectCatKeys();
+	# split the files into the desired number of records each.
+	my $date = getTimeStamp(); # get century most significant digits stripped date.
+	logit( "reading '$defaultCatKeysFile', using file size: $maxRecords" );
+	my $fileCounts = splitFile( $maxRecords, $date, $defaultCatKeysFile );
+	logit( "'$defaultCatKeysFile' split into " . keys( %$fileCounts ) . " parts" );
+	# create the catalog dump of the keys for each set.
+	dumpCatalog( $fileCounts );
+	# get the list of files to FTP.
+	my @fileList = selectFTPList();
+	# FTP the files
+	# logit( "ftp successful" ) if ( ftp( $ftpUrl, $ftpDir, $userName, $password, @fileList ) );
+	# Test ftp site.
+	logit( "ftp successful" ) if ( ftp( "ftp.epl.ca", "atest", "mark", "R2GnBVtt", @fileList ) );
+	logit( "-A finished" ) if ( $opt{'D'} );
 	exit 1;
 }
 
-# make a dump of the catalog.
-if ($opt{'a'})
+#
+# Select the catalog keys for the items that we are going to upload to OCLC.
+# param:  
+# return:
+if ( $opt{'a'} )
+{
+	selectCatKeys();
+}
+
+
+
+#
+# Finds and catalogdumps the cat keys files that match 
+# [0-9][0-9][0-9][0-9][0-9][0-9]\.* (like 120829.FILE5 or 120829.LAST)
+# in the current directory. The output is a marc file called 'DATA.D<file_name>'
+# example: DATA.D120829.FILE5. After the marc file is created, a matching 
+# OCLC label is created.
+# param:  none
+# return: integer - non-zero on success and 0 otherwise.
+if ( $opt{'c'} )
+{
+	logit( "-c started" ) if ( $opt{'D'} );
+	my @fileList = <[0-9][0-9][0-9][0-9][0-9][0-9]\.*>;
+	if ( not @fileList )
+	{
+		logit( "no data files to catalogdump. Did you forget to create list(s) with -a and -s?" );
+		exit( 0 );
+	}
+	my $fileCountHashRef;
+	foreach my $file (@fileList)
+	{
+		# open file and find the number of records.
+		open( KEY_FILE, "<$file" ) or die "Error opening '$file': $!\n";
+		my $recordCount = 0;
+		while(<KEY_FILE>)
+		{
+			$recordCount++;
+		}
+		logit( "found $recordCount cat keys in '$file'" );
+		$fileCountHashRef->{ $file } = $recordCount;
+	}
+	# now pass that to dumpCatalog()
+	dumpCatalog( $fileCountHashRef );
+	logit( "-c finished" ) if ( $opt{'D'} );
+}
+
+#
+# Splits a given file into parts. The split occurs on new lines only. The outputted files
+# are named <yymmdd>.FILE1, ... <yymmdd>.LAST, or <yymmdd>.LAST if there is only one file.
+# param:  inputFileName string - name of the file to split.
+# return: 
+if ( $opt{'s'} )
+{
+	logit( "-s started" ) if ( $opt{'D'} );
+	my $date = getTimeStamp(); # get century most significant digits stripped date.
+	logit( "reading '$opt{'s'}', using file size: $maxRecords" );
+	# Stores the file name (complete path) as a key and the number of items in the file as the value.
+	# Use return value for -A switch to get the list of files and their size otherwise you can just use this 
+	# to split an arbitrary file.
+	my $fileCounts = splitFile( $maxRecords, $date, $opt{'s'} );
+	logit( "'$opt{'s'}' split into " . keys( %$fileCounts ) . " parts" );
+	logit( "-s finished" ) if ( $opt{'D'} );
+}
+
+#
+# FTP the DATA and LABEL files if there are matching sets.
+# 
+if ( $opt{'f'} )
+{
+	logit( "-f started" ) if ( $opt{'D'} );
+	my @fileList = selectFTPList();
+	# logit( "ftp successful" ) if ( ftp( $ftpUrl, $ftpDir, $userName, $password, @fileList ) );
+	# Test ftp site.
+	logit( "ftp successful" ) if ( ftp( "ftp.epl.ca", "atest", "mark", "R2GnBVtt", @fileList ) );
+	logit( "-f finished" ) if ( $opt{'D'} );
+}
+
+close(LOG);
+1; # exit with successful status.
+
+# ======================== Functions =========================
+
+#
+# Selects valid files to FTP to OCLCC. Valid set is a complete set of 
+# DATA files along with a matching set of LABEL files.
+# param:  
+# return: ftpList array - List of files eligible for FTP to OCLC.
+sub selectFTPList
+{
+	logit( "selectFTPList started" ) if ( $opt{'D'} );
+	my @ftpList;
+	# my $password = getPassword( $passwordPath );
+	logit( "password read from '$passwordPath'" );
+	logit( "generating eligible list of marc DATA and LABEL files" );
+	my @dataList = <DATA.D*>;
+	my @labelList= <LABEL.D*>;
+	# rough test that there are the same number of DATA files as LABEL files,
+	# if there are not, there may files left in the directory from earlier in the day.
+	if ( scalar( @dataList ) != scalar( @labelList ) )
+	{
+		logit( "Error: mismatch of DATA and LABEL files" );
+		exit( 0 );
+	}
+	# match up the data and label files.
+	foreach my $dataFile ( @dataList )
+	{
+		my $thisDataName = substr( $dataFile, 4 );
+		foreach my $labelFile ( @labelList )
+		{
+			my $thisLabelName = substr( $labelFile, 5 );
+			if ( $thisDataName eq $thisLabelName )
+			{
+				push( @ftpList, $dataFile );
+				push( @ftpList, $labelFile );
+				logit( "'$dataFile' and '$labelFile' selected" );
+			}
+		}
+	}
+	if ( scalar( @dataList ) * 2 != scalar( @ftpList ) )
+	{
+		logit( "Error: mismatch of DATA and LABEL files" );
+		exit( 0 );
+	}
+	logit( "FTP list: @ftpList" );
+	logit( "selectFTPList finished" ) if ( $opt{'D'} );
+	return @ftpList;
+}
+
+#
+# Select all the catalog keys based on the dates specified.
+# param:  
+# return:
+#
+sub selectCatKeys
 {
 	logit( "-a started" ) if ( $opt{'D'} );
 	# my $APILogfilename        = qq{oclcAPI.log};
@@ -278,113 +427,6 @@ if ($opt{'a'})
 	logit( "catalogue key selection saved in '$catalogKeys'" );
 	logit( "-a finished" ) if ( $opt{'D'} );
 }
-
-#
-# Finds and catalogdumps the cat keys files that match 
-# [0-9][0-9][0-9][0-9][0-9][0-9]\.* (like 120829.FILE5 or 120829.LAST)
-# in the current directory. The output is a marc file called 'DATA.D<file_name>'
-# example: DATA.D120829.FILE5. After the marc file is created, a matching 
-# OCLC label is created.
-# param:  none
-# return: integer - non-zero on success and 0 otherwise.
-if ( $opt{'c'} )
-{
-	logit( "-c started" ) if ( $opt{'D'} );
-	my @fileList = <[0-9][0-9][0-9][0-9][0-9][0-9]\.*>;
-	if ( not @fileList )
-	{
-		logit( "no data files to catalogdump. Did you forget to create list(s) with -a and -s?" );
-		exit( 0 );
-	}
-	my $fileCountHashRef;
-	foreach my $file (@fileList)
-	{
-		# open file and find the number of records.
-		open( KEY_FILE, "<$file" ) or die "Error opening '$file': $!\n";
-		my $recordCount = 0;
-		while(<KEY_FILE>)
-		{
-			$recordCount++;
-		}
-		logit( "found $recordCount cat keys in '$file'" );
-		$fileCountHashRef->{ $file } = $recordCount;
-	}
-	# now pass that to dumpCatalog()
-	dumpCatalog( $fileCountHashRef );
-	logit( "-c finished" ) if ( $opt{'D'} );
-}
-
-#
-# Splits a given file into parts. The split occurs on new lines only. The outputted files
-# are named <yymmdd>.FILE1, ... <yymmdd>.LAST, or <yymmdd>.LAST if there is only one file.
-# param:  inputFileName string - name of the file to split.
-# return: 
-if ($opt{'s'})
-{
-	logit( "-s started" ) if ( $opt{'D'} );
-	my $date = getTimeStamp(); # get century most significant digits stripped date.
-	print "-s selected -split file $opt{s} on $date\n" if ($opt{'D'});
-	logit( "reading '" . $opt{'s'} . "' lines read, using file size: $maxRecords" );
-	# Stores the file name (complete path) as a key and the number of items in the file as the value.
-	# Use return value for -A switch to get the list of files and their size otherwise you can just use this 
-	# to split an arbitrary file.
-	my $fileCounts = splitFile( $maxRecords, $date, $opt{'s'} );
-	logit( "'$opt{'s'}' split into " . keys( %$fileCounts ) . " parts" );
-	logit( "-s finished" ) if ( $opt{'D'} );
-}
-
-#
-# FTP the DATA and LABEL files if there are matching sets.
-# 
-if ( $opt{'f'} )
-{
-	logit( "-f started" ) if ( $opt{'D'} );
-	my @ftpList;
-	# my $password = getPassword( $passwordPath );
-	logit( "password read from '$passwordPath'" );
-	logit( "generating eligible list of marc DATA and LABEL files" );
-	my @dataList = <DATA.D*>;
-	my @labelList= <LABEL.D*>;
-	# rough test that there are the same number of DATA files as LABEL files,
-	# if there are not, there may files left in the directory from earlier in the day.
-	if ( scalar( @dataList ) != scalar( @labelList ) )
-	{
-		logit( "Error: mismatch of DATA and LABEL files" );
-		exit( 0 );
-	}
-	# match up the data and label files.
-	foreach my $dataFile ( @dataList )
-	{
-		my $thisDataName = substr( $dataFile, 4 );
-		foreach my $labelFile ( @labelList )
-		{
-			my $thisLabelName = substr( $labelFile, 5 );
-			if ( $thisDataName eq $thisLabelName )
-			{
-				push( @ftpList, $dataFile );
-				push( @ftpList, $labelFile );
-				logit( "'$dataFile' and '$labelFile' selected" );
-			}
-		}
-	}
-	if ( scalar( @dataList ) * 2 != scalar( @ftpList ) )
-	{
-		logit( "Error: mismatch of DATA and LABEL files" );
-		exit( 0 );
-	}
-	logit( "FTP list: @ftpList" );
-	#ftp( $ftpUrl, $ftpDir, $userName, $password, @ftpList );
-	foreach my $file ( @ftpList )
-	{
-		logit( "ftp '$file' successful" ) if ( ftp( "ftp.epl.ca", "atest", "mark", "R2GnBVtt", $file ) );
-	}
-	logit( "-f finished" ) if ( $opt{'D'} );
-}
-
-close(LOG);
-1; # exit with successful status.
-
-# ======================== Functions =========================
 
 #
 # Dumps the cat keys from a list of files and creates labels for those files.
