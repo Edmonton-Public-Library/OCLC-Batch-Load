@@ -180,6 +180,25 @@ sub getPassword
 }
 
 #
+# bash-3.00$ ftp edx.oclc.org
+# Connected to edx.oclc.org.
+# 220-TCPIPFTP IBM FTP CS V1R11 at ESA1.DEV.OCLC.ORG, 17:25:30 on 2012-08-31.
+# 220 Connection will close if idle for more than 10 minutes.
+# Name (edx.oclc.org:sirsi): tcnedm1
+# 331 Send password please.
+# Password:
+# 230-Password was changed.
+# 230 TCNEDM1 is logged on.  Working directory is "TCNEDM1.".
+# Remote system type is MVS.
+# ftp> quit
+# 221 Quit command received. Goodbye.
+# bash-3.00$
+sub resetPassword
+{
+	
+}
+
+#
 # Prints the argument message to stdout and log file.
 # param:  message string.
 # return: 
@@ -533,14 +552,16 @@ sub ftp
 		return 0;
 	}
 	logit( "logged in" );
-	$ftp->cwd($directory) or $newError = 1; 
+	$ftp->cwd( $directory ) or $newError = 1; 
 	if ($newError)
 	{
 		logit( "can't change to $directory on $host: $!" );
 		$ftp->quit;
 		return 0;
 	}
+	logit( "working directory now $directory" );
 	$ftp->binary;
+	logit( "binary mode set" );
 	foreach my $localFile (@fileList)
 	{
 		# locally we use the fully qualified path but
@@ -554,7 +575,7 @@ sub ftp
 			$ftp->quit;
 			return 0;
 		}
-		logit( "ftp->put: uploaded $localFile to $host" );
+		logit( "uploaded $localFile to $host" );
 	}
 	$ftp->quit;
 	return 1;
