@@ -5,16 +5,10 @@
 #          the purposes of searching and other InterLibrary Loans (ILL).
 #
 # Steps (each explained later):
-# 1.  Contact FTP address ftp.edx.oclc.org.
-# 2.  Login with user name: TCNEDM1
-# 3.  Type password.
-# 3a. Change password. Do this with each upload.
-# 4.  Change directory to 'EDX.EBSB.CNEDM.FTP'.
-# 5.  Set transfer mode to binary.
-# 6.  Put  DATA.D120623.aa
-# 7.  Put LABEL.D120623.aa
-# 8.  Repeat over all split files.
-# 9.  Exit gracefully.
+# 1) oclc.pl -a [-d"start,end"]
+# 2) oclc.pl -s $defaultCatKeysFile
+# 3) oclc.pl -c
+# 4) oclc.pl -f
 #
 # Author:  Andrew Nisbet
 # Date:    June 4, 2012
@@ -29,6 +23,7 @@ use File::Basename;  # Used in ftp() for local and remote file identification.
 use Net::FTP;
 use POSIX;           # for ceil()
 
+my $VERSION = 0.0;
 ##### function must be first because logging uses it almost immediately.
 # Returns a timestamp for the log file only. The Database uses the default
 # time of writing the record for its timestamp in SQL. That was done to avoid
@@ -105,21 +100,30 @@ sub usage
 
 Uploads bibliographic records to OCLC.
 
-usage: $0 [-acADx] [-s file] [-f files] [-z <n>] [-d"[start_date],[end_date]"]
+To run the process manually do:
+1) oclc.pl -a [-d"start,end"]
+2) oclc.pl -s $defaultCatKeysFile
+3) oclc.pl -c
+4) oclc.pl -f
+
+usage: $0 [-acADltx] [-s file] [-f files] [-z <n>] [-d"[start_date],[end_date]"]
 
  -a            : Run the API commands to generate a file of catalog keys called $catalogKeys.
-                 If -D is selected, the intermediate temporary files are not deleted.
+                 If -t is selected, the intermediate temporary files are not deleted.
  -A            : Do everything: run api catalog dump, split to default sized
                  files and upload the split files and labels. Same as running
 			     -a -f 
  -c            : Catalog dump the cat keys found in any data files (like DATA.D120829.FILE5) 
                  in the current directory, replacing the contents with the dumped catalog records.
+ -D            : Creates deleted items for OCLC upload. Like -A but for deletes. 
  -d [start,end]: Comma separated start and end date. Restricts search for items by create and 
                  modify dates. Defaults to one month ago as specified by 'transdate -m-1' and 
 				 today's date for an end date. Both are optional but must be valid ANSI dates or
 				 the defaults are used.
- -D            : Debug
+ -t            : Debug
  -f            : Finds DATA and matching LABEL files in current directory, and FTPs them to OCLC.
+ -lyymmdd.LAST : Create a label file for a given file name. NOTE: use the yymmdd.FILEn, or yymmdd.LAST
+                 since $0 needs to count the number of records; the DATA.D MARC file has 1 line.
  -s [file]     : Split input into maximum number of records per DATA file(default 90000).
  -x            : This (help) message.
  -z [int]      : Set the maximum output file size in lines, not bytes, this allows for splitting 
@@ -133,6 +137,8 @@ example: To just split an arbitrary text file into files of 51 lines each: $0 -z
 		 To create marc record files from existing key files: $0 -c
 		 To FTP existing marc DATA and LABEL files to OCLC: $0 -f
          To do everything: $0 -A
+		 
+ Version: $VERSION
 EOF
     exit;
 }
@@ -192,13 +198,32 @@ sub logit
 # return: 
 sub init
 {
-    my $opt_string = 'AacDd:fxs:z:';
+    my $opt_string = 'Aactd:fl:xs:z:';
     getopts( "$opt_string", \%opt ) or usage();
     usage() if ($opt{'x'});
 	if ( $opt{'z'} )
 	{
 		$maxRecords = $opt{'z'};
 		logit( "maximum file size set to $opt{'z'}" );
+	}
+	if ( $opt{'l'} ) # expects <yymmdd>.FILEn
+	{
+		if ( $opt{'l'} =~ m/\d[6]/ )
+		{
+			logit( "looks like '$opt{'l'}' is not a valid data file name. Exiting" );
+			exit( 0 );
+		}
+		logit( "creating label file for '$opt{'l'}'" );
+		# we need $dataFileName, $numRecords so 
+		open( DATA, "<$opt{'l'}" ) or die "Error opening '$opt{'l'}': $!\n";
+		my $lineCount = 0;
+		while(<DATA>)
+		{
+			$lineCount++;
+		}
+		close( DATA );
+		my ($fileName, $directory, $suffix) = fileparse( $opt{'l'} );
+		createOCLCLableFiles( $fileName, $lineCount );
 	}
 }
 init();
@@ -207,7 +232,7 @@ init();
 # ANY text file into 90000 line files.
 if ($opt{'A'})
 {
-	logit( "-A started" ) if ( $opt{'D'} );
+	logit( "-A started" ) if ( $opt{'t'} );
 	# select the catalog keys.
 	selectCatKeys();
 	# split the files into the desired number of records each.
@@ -223,14 +248,22 @@ if ($opt{'A'})
 	# logit( "ftp successful" ) if ( ftp( $ftpUrl, $ftpDir, $userName, $password, @fileList ) );
 	# Test ftp site.
 	logit( "ftp successful" ) if ( ftp( "ftp.epl.ca", "atest", "mark", "R2GnBVtt", @fileList ) );
-	logit( "-A finished" ) if ( $opt{'D'} );
+	logit( "-A finished" ) if ( $opt{'t'} );
+	exit 1;
+}
+
+# Creates and uploads the delete items for OCLC.
+if ($opt{'D'})
+{
+	logit( "-D started" ) if ( $opt{'t'} );
+	## Select deleted items from the history log.
+	logit( "-D finished" ) if ( $opt{'t'} );
 	exit 1;
 }
 
 #
 # Select the catalog keys for the items that we are going to upload to OCLC.
 # param:  
-# return:
 if ( $opt{'a'} )
 {
 	selectCatKeys();
@@ -245,10 +278,9 @@ if ( $opt{'a'} )
 # example: DATA.D120829.FILE5. After the marc file is created, a matching 
 # OCLC label is created.
 # param:  none
-# return: integer - non-zero on success and 0 otherwise.
 if ( $opt{'c'} )
 {
-	logit( "-c started" ) if ( $opt{'D'} );
+	logit( "-c started" ) if ( $opt{'t'} );
 	my @fileList = <[0-9][0-9][0-9][0-9][0-9][0-9]\.*>;
 	if ( not @fileList )
 	{
@@ -270,17 +302,16 @@ if ( $opt{'c'} )
 	}
 	# now pass that to dumpCatalog()
 	dumpCatalog( $fileCountHashRef );
-	logit( "-c finished" ) if ( $opt{'D'} );
+	logit( "-c finished" ) if ( $opt{'t'} );
 }
 
 #
 # Splits a given file into parts. The split occurs on new lines only. The outputted files
 # are named <yymmdd>.FILE1, ... <yymmdd>.LAST, or <yymmdd>.LAST if there is only one file.
 # param:  inputFileName string - name of the file to split.
-# return: 
 if ( $opt{'s'} )
 {
-	logit( "-s started" ) if ( $opt{'D'} );
+	logit( "-s started" ) if ( $opt{'t'} );
 	my $date = getTimeStamp(); # get century most significant digits stripped date.
 	logit( "reading '$opt{'s'}', using file size: $maxRecords" );
 	# Stores the file name (complete path) as a key and the number of items in the file as the value.
@@ -288,20 +319,19 @@ if ( $opt{'s'} )
 	# to split an arbitrary file.
 	my $fileCounts = splitFile( $maxRecords, $date, $opt{'s'} );
 	logit( "'$opt{'s'}' split into " . keys( %$fileCounts ) . " parts" );
-	logit( "-s finished" ) if ( $opt{'D'} );
+	logit( "-s finished" ) if ( $opt{'t'} );
 }
 
 #
 # FTP the DATA and LABEL files if there are matching sets.
-# 
 if ( $opt{'f'} )
 {
-	logit( "-f started" ) if ( $opt{'D'} );
+	logit( "-f started" ) if ( $opt{'t'} );
 	my @fileList = selectFTPList();
 	# logit( "ftp successful" ) if ( ftp( $ftpUrl, $ftpDir, $userName, $password, @fileList ) );
 	# Test ftp site.
 	logit( "ftp successful" ) if ( ftp( "ftp.epl.ca", "atest", "mark", "R2GnBVtt", @fileList ) );
-	logit( "-f finished" ) if ( $opt{'D'} );
+	logit( "-f finished" ) if ( $opt{'t'} );
 }
 
 close(LOG);
@@ -316,7 +346,7 @@ close(LOG);
 # return: ftpList array - List of files eligible for FTP to OCLC.
 sub selectFTPList
 {
-	logit( "selectFTPList started" ) if ( $opt{'D'} );
+	logit( "selectFTPList started" ) if ( $opt{'t'} );
 	my @ftpList;
 	# my $password = getPassword( $passwordPath );
 	logit( "password read from '$passwordPath'" );
@@ -351,7 +381,7 @@ sub selectFTPList
 		exit( 0 );
 	}
 	logit( "FTP list: @ftpList" );
-	logit( "selectFTPList finished" ) if ( $opt{'D'} );
+	logit( "selectFTPList finished" ) if ( $opt{'t'} );
 	return @ftpList;
 }
 
@@ -362,21 +392,21 @@ sub selectFTPList
 #
 sub selectCatKeys
 {
-	logit( "-a started" ) if ( $opt{'D'} );
+	logit( "-a started" ) if ( $opt{'t'} );
 	# my $APILogfilename        = qq{oclcAPI.log};
 	my $initialItemCatKeys = qq{tmp_a};
 	my $sortedItemCatKeys  = qq{tmp_b};
 	my $dateRefinedCatKeys = qq{tmp_c};
 	# my $catalogKeys = qq{catalog_keys.lst}; # master list of catalog keys.
-	print "-a selected -run API.\n" if ($opt{'D'});
-	# my $unicornItemTypes = "PAPERBACK,JPAPERBACK,BKCLUBKIT,COMIC,DAISYRD,EQUIPMENT,E-RESOURCE,FLICKSTOGO,FLICKTUNE,JFLICKTUNE,JTUNESTOGO,PAMPHLET,RFIDSCANNR,TUNESTOGO,JFLICKTOGO,PROGRAMKIT,LAPTOP,BESTSELLER,JBESTSELLR";
-	my $unicornItemTypes = "PAPERBACK";
+	print "-a selected -run API.\n" if ($opt{'t'});
+	my $unicornItemTypes = "PAPERBACK,JPAPERBACK,BKCLUBKIT,COMIC,DAISYRD,EQUIPMENT,E-RESOURCE,FLICKSTOGO,FLICKTUNE,JFLICKTUNE,JTUNESTOGO,PAMPHLET,RFIDSCANNR,TUNESTOGO,JFLICKTOGO,PROGRAMKIT,LAPTOP,BESTSELLER,JBESTSELLR";
+	# my $unicornItemTypes = "PAPERBACK";
 	logit( "exclude item types: $unicornItemTypes" );
 	my $unicornLocations = "BARCGRAVE,CANC_ORDER,DISCARD,EPLACQ,EPLBINDERY,EPLCATALOG,EPLILL,INCOMPLETE,LONGOVRDUE,LOST,LOST-ASSUM,LOST-CLAIM,LOST-PAID,MISSING,NON-ORDER,ON-ORDER,BINDERY,CATALOGING,COMICBOOK,INTERNET,PAMPHLET,DAMAGE,UNKNOWN,REF-ORDER,BESTSELLER,JBESTSELLR,STOLEN";
 	logit( "exclude locations: $unicornLocations" );
 	# gets all the keys of items that don't match the location list or item type lists.
 	logit( "selecting initial catalogue keys" );
-	# `selitem -t~$unicornItemTypes -l~$unicornLocations -oC >$initialItemCatKeys`;
+	`selitem -t~$unicornItemTypes -l~$unicornLocations -oC >$initialItemCatKeys`;
 	open( INITIAL_CAT_KEYS, "<$initialItemCatKeys" ) or die "No items found.\n";
 	logit( "sorting initial catalogue key selection" );
 	my %initialKeys;
@@ -418,14 +448,14 @@ sub selectCatKeys
 		print SORTED_DATED_CAT_KEYS $finalKey."|\n";
 	}
 	close( SORTED_DATED_CAT_KEYS );
-	if ( not $opt{'D'} )
+	if ( not $opt{'t'} )
 	{
 		unlink( $initialItemCatKeys );
 		unlink( $sortedItemCatKeys  );
 		unlink( $dateRefinedCatKeys );
 	}
 	logit( "catalogue key selection saved in '$catalogKeys'" );
-	logit( "-a finished" ) if ( $opt{'D'} );
+	logit( "-a finished" ) if ( $opt{'t'} );
 }
 
 #
@@ -438,7 +468,7 @@ sub selectCatKeys
 sub dumpCatalog
 {
 	my $fileCountHashRef = $_[0];
-	logit( "dumpCatalog started" ) if ( $opt{'D'} );
+	logit( "dumpCatalog started" ) if ( $opt{'t'} );
 	while( my ($fileName, $numRecords) = each %$fileCountHashRef )
 	{
 		# open and read the keys in the file
@@ -447,7 +477,7 @@ sub dumpCatalog
 		# create a label for the file.
 		createOCLCLableFiles( $fileName, $numRecords );
 	}
-	logit( "dumpCatalog finished" ) if ( $opt{'D'} );
+	logit( "dumpCatalog finished" ) if ( $opt{'t'} );
 }
 
 #
@@ -539,7 +569,7 @@ sub ftp
 sub splitFile
 {
 	my ($maxRecords, $baseName, $fileInput) = @_;
-	logit( "splitFile started" ) if ( $opt{'D'} );
+	logit( "splitFile started" ) if ( $opt{'t'} );
 	my $fileSizeRef;         # hash ref of file names and record sizes.
 	my $lineCount      = 0;  # current number of lines written to the current file fragment.
 	my $numLinesInput  = 0;  # number of input lines to process.
@@ -589,7 +619,7 @@ sub splitFile
 		logit( "created DATA file: '$fileName'" );
 	}
 	close(INPUT);
-	logit( "splitFile finished" ) if ( $opt{'D'} );
+	logit( "splitFile finished" ) if ( $opt{'t'} );
 	return $fileSizeRef;
 }
 
@@ -624,7 +654,7 @@ sub createOCLCLableFiles
 	open( LABEL, ">$labelFileName" ) or die "error couldn't create label file '$labelFileName': $!\n";
 	print LABEL "DAT  ".getTimeStamp(0)."000000.0\n"; # 14.1 - '0' right fill.
 	print LABEL "RBF  $numRecords\n"; # like: 88947
-	print LABEL "DSN  $fileName\n"; # DATA.D110405
+	print LABEL "DSN  DATA.D$fileName\n"; # DATA.D110405.LAST
 	print LABEL "ORS  CNEDM\n";
 	print LABEL "FDI  P012569\n";
 	close( LABEL );
