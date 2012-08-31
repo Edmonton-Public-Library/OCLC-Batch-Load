@@ -80,7 +80,7 @@ my $userName       = "t".$edxAccount."1";      # User name.
 my $ftpUrl         = qq{edx.oclc.org};
 my $ftpDir         = qq{edx.ebsb.$edxAccount.ftp};
 ##### Client side parameters
-my $maxRecords     = 90000;            # Max number records we can upload at a time, use -s to change.
+my $maxRecords     = 16000;            # Max number records we can upload at a time, use -s to change.
 my $date           = getTimeStamp;     # current date in ascii.
 my $oclcDir        = "."; #qq{/s/sirsi/Unicorn/EPLwork/OCLC};
 my $passwordPath   = qq{$oclcDir/password.txt};
@@ -158,26 +158,25 @@ sub getPassword
 {
 	my $path = shift;
 	my $isNewPasswordRequest = shift;
+	my $oldPassword;
 	my $newPassword;
-	open(PASSWORD, "<$path") or die "error: getPassword($path) failed: $!\n";
+	open( PASSWORD, "<$path" ) or die "error: getPassword($path) failed: $!\n";
 	my @lines = <PASSWORD>;
-	close(PASSWORD);
+	close( PASSWORD );
 	die "error: password file must contain the password as the first line.\n" if (! @lines or $lines[0] eq "");
-	$newPassword = $lines[0];
-	chomp($newPassword);
-	if (defined($isNewPasswordRequest))
+	$oldPassword = $lines[0];
+	chomp( $oldPassword );
+	if ( defined( $isNewPasswordRequest ) )
 	{
-		my @passwdChars = split('', $newPassword);
+		my @passwdChars = split('', $oldPassword);
 		++$passwdChars[$#passwdChars];
 		$newPassword = join('',@passwdChars);
-		warn "error: getPassword($path) failed to remove old password file: $!\n" if (! unlink($path));
-		# this will allow the user to get a new password even if there was a problem removing the old file
-		# or saving to a new file.
 		open(PASSWORD, ">$path") or print "error: getPassword($path) failed: $!, the new password is $newPassword\n";
 		print PASSWORD "$newPassword\n";
 		close(PASSWORD);
+		return $newPassword;
 	}
-	return $newPassword;
+	return $oldPassword;
 }
 
 #
@@ -328,9 +327,11 @@ if ( $opt{'f'} )
 {
 	logit( "-f started" ) if ( $opt{'t'} );
 	my @fileList = selectFTPList();
-	# logit( "ftp successful" ) if ( ftp( $ftpUrl, $ftpDir, $userName, $password, @fileList ) );
+	my $password = getPassword( $passwordPath );
+	logit( "password read from '$passwordPath'" );
+	logit( "ftp successful" ) if ( ftp( $ftpUrl, $ftpDir, $userName, $password, @fileList ) );
 	# Test ftp site.
-	logit( "ftp successful" ) if ( ftp( "ftp.epl.ca", "atest", "mark", "R2GnBVtt", @fileList ) );
+	# logit( "ftp successful" ) if ( ftp( "ftp.epl.ca", "atest", "mark", "R2GnBVtt", @fileList ) );
 	logit( "-f finished" ) if ( $opt{'t'} );
 }
 
@@ -348,8 +349,6 @@ sub selectFTPList
 {
 	logit( "selectFTPList started" ) if ( $opt{'t'} );
 	my @ftpList;
-	# my $password = getPassword( $passwordPath );
-	logit( "password read from '$passwordPath'" );
 	logit( "generating eligible list of marc DATA and LABEL files" );
 	my @dataList = <DATA.D*>;
 	my @labelList= <LABEL.D*>;
