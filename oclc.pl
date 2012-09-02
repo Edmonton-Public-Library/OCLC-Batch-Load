@@ -541,43 +541,30 @@ sub getDateBounds
 sub ftp
 {
 	my ($host, $directory, $userName, $password, @fileList) = @_;
-	my $newError = 0;
-	my $ftp = Net::FTP->new($host, Timeout=>240) or die "can't ftp to $host: $!\n";
-	logit( "connected to $host" );
-	$ftp->login($userName, $password) or $newError = 1;
-	if ($newError)
-	{
-		logit( "Can't login to $host: $!" );
-		$ftp->quit;
-		return 0;
-	}
-	logit( "logged in" );
-	$ftp->cwd( $directory ) or $newError = 1; 
-	if ($newError)
-	{
-		logit( "can't change to $directory on $host: $!" );
-		$ftp->quit;
-		return 0;
-	}
-	logit( "working directory now $directory" );
-	$ftp->binary;
+	open( FTP, "| ftp -n $host\n" ) or die "Error failed to open stream to $host: $!\n";
+	logit( "stream opened." );
+	print FTP "quote USER $userName\n";
+	logit( "passed user name" );
+	print FTP "quote PASS $password\n";
+	logit( "password sent" );
+	print FTP "bin\n";
 	logit( "binary mode set" );
-	foreach my $localFile (@fileList)
+	# does this work? No.
+	# print FTP "quote PASS R2GnBVtt/iLovePuppets/iLovePuppets\n";
+	# This isn't understood by the epl.ca ftp server.
+	print FTP "quote site cyl pri=20 sec=20\n";
+	logit( "set pri and sec for oversized files" );
+	print FTP "cd $directory\n";
+	logit( "cd'd to $directory" );
+	foreach my $file ( @fileList )
 	{
-		# locally we use the fully qualified path but
-		# remotely we just put the file in the directory.
-		my ($remoteFile, $directories, $suffix) = fileparse($localFile);
-		logit( "putting: $remoteFile" );
-		$ftp->put($localFile, $remoteFile) or $newError = 1;
-		if ($newError)
-		{
-			logit( "ftp->put: failed to upload $localFile to $host: $!" );
-			$ftp->quit;
-			return 0;
-		}
-		logit( "uploaded $localFile to $host" );
+		logit( "putting $file" );
+		print FTP "put $file\n";
 	}
-	$ftp->quit;
+	print FTP "ls\n";
+	print FTP "bye\n";
+	logit( "connection closed" );
+	close( FTP );
 	return 1;
 }
 
