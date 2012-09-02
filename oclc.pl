@@ -20,7 +20,6 @@ use warnings;
 use vars qw/ %opt /;
 use Getopt::Std;
 use File::Basename;  # Used in ftp() for local and remote file identification.
-use Net::FTP;
 use POSIX;           # for ceil()
 
 my $VERSION = 0.0;
