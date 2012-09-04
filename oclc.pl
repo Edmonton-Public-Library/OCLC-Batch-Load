@@ -286,8 +286,6 @@ if ( $opt{'a'} )
 	selectCatKeys();
 }
 
-
-
 #
 # Finds and catalogdumps the cat keys files that match 
 # [0-9][0-9][0-9][0-9][0-9][0-9]\.* (like 120829.FILE5 or 120829.LAST)
@@ -553,8 +551,8 @@ sub ftp
 	# This isn't understood by the epl.ca ftp server.
 	print FTP "quote site cyl pri=20 sec=20\n";
 	logit( "set pri and sec for oversized files" );
-	print FTP "cd $directory\n";
-	logit( "cd'd to $directory" );
+	print FTP "cd '$directory'\n";
+	logit( "cd'd to '$directory'" );
 	foreach my $file ( @fileList )
 	{
 		logit( "putting $file" );
