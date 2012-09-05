@@ -75,6 +75,8 @@ sub getTimeStamp
 }
 ##### Server side parameters
 my $edxAccount     = qq{cnedm};
+my $projectIdMixed = qq{P012569};
+my $projectIdCancel= qq{P012570};
 my $userName       = "t".$edxAccount."1";      # User name.
 my $ftpUrl         = qq{edx.oclc.org};
 my $ftpDir         = qq{edx.ebsb.$edxAccount.ftp};
@@ -105,7 +107,7 @@ To run the process manually do:
 3) oclc.pl -c
 4) oclc.pl -f
 
-usage: $0 [-acADltx] [-s file] [-f files] [-z <n>] [-d"[start_date],[end_date]"]
+usage: $0 [-acADtx] [-s file] [-f files] [-z <n>] [-d"[start_date],[end_date]"] [-[lm] file]
 
  -a            : Run the API commands to generate a file of catalog keys called $catalogKeys.
                  If -t is selected, the intermediate temporary files are not deleted.
@@ -121,8 +123,10 @@ usage: $0 [-acADltx] [-s file] [-f files] [-z <n>] [-d"[start_date],[end_date]"]
 				 the defaults are used.
  -t            : Debug
  -f            : Finds DATA and matching LABEL files in current directory, and FTPs them to OCLC.
- -lyymmdd.LAST : Create a label file for a given file name. NOTE: use the yymmdd.FILEn, or yymmdd.LAST
+ -lyymmdd.LAST : Create a label file for a given CANCEL or Delete file. NOTE: use the yymmdd.FILEn, or yymmdd.LAST
                  since $0 needs to count the number of records; the DATA.D MARC file has 1 line.
+ -myymmdd.LAST : Create a label file for a given MIXED or adds/changes project file. NOTE: use the yymmdd.FILEn,
+                 or yymmdd.LAST since $0 needs to count the number of records; the DATA.D MARC file has 1 line.
  -s [file]     : Split input into maximum number of records per DATA file(default 90000).
  -x            : This (help) message.
  -z [int]      : Set the maximum output file size in lines, not bytes, this allows for splitting 
@@ -215,7 +219,7 @@ sub logit
 # return: 
 sub init
 {
-    my $opt_string = 'Aactd:fl:xs:z:';
+    my $opt_string = 'AactDd:fl:m:xs:z:';
     getopts( "$opt_string", \%opt ) or usage();
     usage() if ($opt{'x'});
 	if ( $opt{'z'} )
@@ -223,24 +227,13 @@ sub init
 		$maxRecords = $opt{'z'};
 		logit( "maximum file size set to $opt{'z'}" );
 	}
-	if ( $opt{'l'} ) # expects <yymmdd>.FILEn
+	if ( $opt{'l'} ) # expects <yymmdd>.FILEn for cancel project id.
 	{
-		if ( $opt{'l'} =~ m/\d[6]/ )
-		{
-			logit( "looks like '$opt{'l'}' is not a valid data file name. Exiting" );
-			exit( 0 );
-		}
-		logit( "creating label file for '$opt{'l'}'" );
-		# we need $dataFileName, $numRecords so 
-		open( DATA, "<$opt{'l'}" ) or die "Error opening '$opt{'l'}': $!\n";
-		my $lineCount = 0;
-		while(<DATA>)
-		{
-			$lineCount++;
-		}
-		close( DATA );
-		my ($fileName, $directory, $suffix) = fileparse( $opt{'l'} );
-		createOCLCLableFiles( $fileName, $lineCount );
+		createStandAloneLabelFile( $opt{'l'}, $projectIdCancel );
+	}
+	if ( $opt{'m'} )# expects <yymmdd>.FILEn for mixed project id.
+	{
+		createStandAloneLabelFile( $opt{'m'}, $projectIdMixed );
 	}
 }
 init();
@@ -264,6 +257,7 @@ if ($opt{'A'})
 	# FTP the files
 	# logit( "ftp successful" ) if ( ftp( $ftpUrl, $ftpDir, $userName, $password, @fileList ) );
 	# Test ftp site.
+	# TODO ######################## change for production ##############################
 	logit( "ftp successful" ) if ( ftp( "ftp.epl.ca", "atest", "mark", "R2GnBVtt", @fileList ) );
 	logit( "-A finished" ) if ( $opt{'t'} );
 	exit 1;
@@ -274,8 +268,81 @@ if ($opt{'D'})
 {
 	logit( "-D started" ) if ( $opt{'t'} );
 	## Select deleted items from the history log.
+	# Select the history files we need. If the requested files are from April 5 onward, we need to specify /{HIST}/201105.hist.Z
+	my @histLogs = getRelevantHistoryLogFiles();
+	# collect codes of deleted items.
+	my @deletedItems = collectDeletedItems( @histLogs );
 	logit( "-D finished" ) if ( $opt{'t'} );
 	exit 1;
+}
+
+#
+# Search the arg list of log files for entries of remove item (FV) and remove title option (NOY).
+# param:  log files List - list of log files to search.
+# return: List of items, where 'item' is TBD.
+#
+sub collectDeletedItems
+{
+	my @logFiles = @_;
+	my @items    = ();
+	foreach my $file ( @logFiles )
+	{
+		my $result = `gzgrep FVFF $file`;
+		my @potentialItems  = split( '\n', $result );
+		foreach my $item ( @potentialItems )
+		{
+			if ( $item =~ m/NOY/ )
+			{
+				push( @items, $item );
+			}
+		}
+	}
+	print "found ".scalar( @items )." in logs like:\n $items[0] \n $items[1] \n";
+	return @items;
+}
+
+#
+# Returns a list of History logs that are required to meet the date criteria.
+# param:  
+# return: fully qualified paths of the history files required by date criteria.
+sub getRelevantHistoryLogFiles
+{
+	# get the inclusive dates and an entire list of history files from the hist directory.
+	# find the history files that are >= the start date and <= end date and place them on a list.
+	# if the end date is today's date then we need to add a specially named log file that looks like
+	# 20120904.hist
+	my @logs = ();
+	my $dateBounds = getDateBounds();
+	my $date       = `transdate -d-0`;
+	chomp( $date );
+	# ">$startDate<$endDate"
+	$dateBounds =~ s/>//;
+	my ( $start, $end ) = split( "<", $dateBounds );
+	# Start will be the first 6 chars of an ANSI date: 20120805 and 20120904
+	my $startFileName = substr( $start, 0, 6 );
+	my $endFileName   = substr( $end,   0, 6 );
+	my $path = `getpathname hist`;
+	chomp( $path );
+	my @fileList = <$path/*.Z>;
+	my ($fileName, $directory, $suffix);
+	foreach my $file ( @fileList )
+	{
+		($fileName, $directory, $suffix) = fileparse( $file );
+		my $nameDate = substr( $fileName, 0, 6 );
+		if ( scalar( $nameDate ) >= scalar( $startFileName ) and scalar( $nameDate ) <= scalar( $endFileName ))
+		{
+			push( @logs, $file );
+		}
+	}
+	# for today's log file we have to compose the file name
+	if ( $end eq $date )
+	{
+		# append today's log which looks like 20120904.hist
+		print " $end matches today's date.\n";
+		push ( @logs, "$directory$date.hist" );
+	}
+	logit( "found the following logs that match date criteria: @logs" );
+	return @logs;
 }
 
 #
@@ -415,7 +482,6 @@ sub selectCatKeys
 	# my $catalogKeys = qq{catalog_keys.lst}; # master list of catalog keys.
 	print "-a selected -run API.\n" if ($opt{'t'});
 	my $unicornItemTypes = "PAPERBACK,JPAPERBACK,BKCLUBKIT,COMIC,DAISYRD,EQUIPMENT,E-RESOURCE,FLICKSTOGO,FLICKTUNE,JFLICKTUNE,JTUNESTOGO,PAMPHLET,RFIDSCANNR,TUNESTOGO,JFLICKTOGO,PROGRAMKIT,LAPTOP,BESTSELLER,JBESTSELLR";
-	# my $unicornItemTypes = "PAPERBACK";
 	logit( "exclude item types: $unicornItemTypes" );
 	my $unicornLocations = "BARCGRAVE,CANC_ORDER,DISCARD,EPLACQ,EPLBINDERY,EPLCATALOG,EPLILL,INCOMPLETE,LONGOVRDUE,LOST,LOST-ASSUM,LOST-CLAIM,LOST-PAID,MISSING,NON-ORDER,ON-ORDER,BINDERY,CATALOGING,COMICBOOK,INTERNET,PAMPHLET,DAMAGE,UNKNOWN,REF-ORDER,BESTSELLER,JBESTSELLR,STOLEN";
 	logit( "exclude locations: $unicornLocations" );
@@ -490,7 +556,7 @@ sub dumpCatalog
 		logit( "dumping catalogue keys found in '$fileName' to 'DATA.D$fileName'" );
         `cat $fileName | catalogdump -om > DATA.D$fileName 2>>$APILogfilename`;
 		# create a label for the file.
-		createOCLCLableFiles( $fileName, $numRecords );
+		createOCLCLableFiles( $fileName, $numRecords, $projectIdMixed );
 	}
 	logit( "dumpCatalog finished" ) if ( $opt{'t'} );
 }
@@ -627,6 +693,33 @@ sub splitFile
 	return $fileSizeRef;
 }
 
+# Creates a valid OCLC label file for a specific project type. Projects are either 
+# mixed for adds and changes, or cancel for deleted catalog items.
+# param:  file string - name of the file with fully qualified path
+# param:  projectType string - project id for either cancels or mixed.
+# return: 
+# side effect: creates label file.
+sub createStandAloneLabelFile
+{
+	my ( $file, $projectType ) = @_;
+	if ( $file =~ m/\d[6]/ )
+	{
+		logit( "looks like '$file' is not a valid data file name. Exiting" );
+		exit( 0 );
+	}
+	logit( "creating label file for '$file'" );
+	# we need $dataFileName, $numRecords so 
+	open( DATA, "<$file" ) or die "Error opening '$file': $!\n";
+	my $lineCount = 0;
+	while(<DATA>)
+	{
+		$lineCount++;
+	}
+	close( DATA );
+	my ($fileName, $directory, $suffix) = fileparse( $file );
+	createOCLCLableFiles( $fileName, $lineCount, $projectType );
+}
+
 # Creates the label file to specifications:
 # The LABEL file should be created as a flat text file. It contains 
 # the metadata of the uploaded DATA file. There are five mandatory 
@@ -652,15 +745,15 @@ sub splitFile
 #### TEST ####
 sub createOCLCLableFiles
 {
-	my ( $dataFileName, $numRecords ) = @_;
+	my ( $dataFileName, $numRecords, $projectId ) = @_;
 	my ($fileName, $directory, $suffix) = fileparse($dataFileName);
 	my $labelFileName = $directory.qq{LABEL.D}.$fileName;
 	open( LABEL, ">$labelFileName" ) or die "error couldn't create label file '$labelFileName': $!\n";
 	print LABEL "DAT  ".getTimeStamp(0)."000000.0\n"; # 14.1 - '0' right fill.
 	print LABEL "RBF  $numRecords\n"; # like: 88947
 	print LABEL "DSN  DATA.D$fileName\n"; # DATA.D110405.LAST
-	print LABEL "ORS  CNEDM\n";
-	print LABEL "FDI  P012569\n";
+	print LABEL "ORS  ".uc( $edxAccount )."\n";   # Institution id.
+	print LABEL "FDI  ".uc( $projectId )."\n"; # project code number.
 	close( LABEL );
 	logit( "created LABEL file '$labelFileName'" );
 }
