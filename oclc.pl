@@ -271,34 +271,70 @@ if ($opt{'D'})
 	# Select the history files we need. If the requested files are from April 5 onward, we need to specify /{HIST}/201105.hist.Z
 	my @histLogs = getRelevantHistoryLogFiles();
 	# collect codes of deleted items.
-	my @deletedItems = collectDeletedItems( @histLogs );
+	my $deletedItemKeys = collectDeletedItems( @histLogs );
+	# the deleted items are lines from the history file - one for each record.
+	my $fileCounts = splitFile( $maxRecords, $date, $deletedItemKeys );
 	logit( "-D finished" ) if ( $opt{'t'} );
 	exit 1;
+}
+
+#*** DOCUMENT BOUNDARY ***
+#FORM=MARC
+#.000. |aamI 0d
+#.001. |aACY-7433
+#.008. |a120831nuuuu    xx            000 u und u
+#.035.   |a(OCoLC)30913700
+#.852.   |aCNEDM
+#
+#
+sub makeMARC
+{
+
 }
 
 #
 # Search the arg list of log files for entries of remove item (FV) and remove title option (NOY).
 # param:  log files List - list of log files to search.
-# return: List of items, where 'item' is TBD.
-#
+# return: Hash reference of cat keys as key and history log entry as value.
 sub collectDeletedItems
 {
 	my @logFiles = @_;
-	my @items    = ();
+	my $items;
+	open( ITEMS, ">items.log" ) or die "$!\n";
 	foreach my $file ( @logFiles )
 	{
 		my $result = `gzgrep FVFF $file`;
 		my @potentialItems  = split( '\n', $result );
-		foreach my $item ( @potentialItems )
+		foreach my $logLine ( @potentialItems )
 		{
-			if ( $item =~ m/NOY/ )
+			if ( $logLine =~ m/\^NOY/ and $logLine =~ m/\^aA\(OCoLC\)/ )
 			{
-				push( @items, $item );
+				my ( $flexKey, $oclcNumber ) = getFlexKeyOCLCNumberPair( $logLine );
+				$items->{ $flexKey } = $oclcNumber;
+				print ITEMS "$logLine\n";
 			}
 		}
 	}
-	print "found ".scalar( @items )." in logs like:\n $items[0] \n $items[1] \n";
-	return @items;
+	close( ITEMS );
+	print "found ".scalar( keys( %$items ) )." in logs \n";
+	return $items;
+}
+
+# Returns the flex key and oclc number pair.
+# param:  log record line string.
+# return: (key, value) flexkey and oclc number.
+sub getFlexKeyOCLCNumberPair
+{
+	my $logRecord = $_[0];
+	my $key;
+	my $value;
+	my @entries = split( /\^/, $logRecord );
+	foreach my $entry ( @entries )
+	{
+		$key   = $entry if ( $entry =~ s/^IU// );
+		$value = $entry if ( $entry =~ s/^aA// );
+	}
+	return ( $key, $value );
 }
 
 #
@@ -628,6 +664,7 @@ sub ftp
 	print FTP "bye\n";
 	logit( "connection closed" );
 	close( FTP );
+	# $Directives{'status'} = $?;
 	return 1;
 }
 
