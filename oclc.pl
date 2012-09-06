@@ -273,7 +273,15 @@ if ($opt{'D'})
 	# collect codes of deleted items.
 	my $deletedItemKeys = collectDeletedItems( @histLogs );
 	# the deleted items are lines from the history file - one for each record.
-	my $fileCounts = splitFile( $maxRecords, $date, $deletedItemKeys );
+	#### Blow away pre-existing file (from today).
+	open( MASTER_MARC, ">$catalogKeys" ) or die "Unable to write to '$catalogKeys' to write deleted items: $!\n";
+	while ( my ( $key, $value ) = each( %$deletedItemKeys ) )
+	{
+		print MASTER_MARC "$key|$value\n";
+	}
+	close( MASTER_MARC );
+	my $fileCounts = splitFile( $maxRecords, $date, $catalogKeys );
+	makeMARC( $fileCounts );
 	logit( "-D finished" ) if ( $opt{'t'} );
 	exit 1;
 }
@@ -289,7 +297,49 @@ if ($opt{'D'})
 #
 sub makeMARC
 {
+	my $flexOclcHashRef = $_[0];
+	my $fileCountHashRef = $_[0];
+	logit( "dumping MARC records" ) if ( $opt{'t'} );
+	while( my ($fileName, $numRecords) = each %$fileCountHashRef )
+	{
+		# open and read the keys in the file
+		
+		my $outputFileName = qq{DATA.D$fileName};
+		my $outputFileFlat = "$outputFileName.flat";
+		logit( "dumping keys found in '$fileName' to '$outputFileFlat'" );
+		open( SPLIT_FILE, "<$fileName" ) or die "unable to open split file '$fileName': $!\n";
+		open( MARC_FILE, ">$outputFileFlat" ) or die "unable to write to '$outputFileFlat': $!\n";
+		while (<SPLIT_FILE>)
+		{
+			chomp( $_ );
+			print MARC_FILE getFlatMARC( $_, $date );
+		}
+		close( MARC_FILE );
+		close( SPLIT_FILE );
+		# convert with flatskip.
+		`cat $outputFileFlat | flatskip -aMARC -if -om > $outputFileName 2>>$APILogfilename`;
+		logit( "converted '$outputFileFlat' to MARC" );
+		# create a label for the file.
+		createOCLCLableFiles( $fileName, $numRecords, $projectIdCancel );
+	}
+	logit( "dumping of MARC records finished" ) if ( $opt{'t'} );
+}
 
+#
+#
+#
+sub getFlatMARC
+{
+	my ( $record, $date ) = @_;
+	my ( $flexKey, $oclcNumber ) = split( '\|', $record );
+	my $returnString = "*** DOCUMENT BOUNDARY ***\n";
+	$returnString .= "FORM=MARC\n";
+	$returnString .= ".000. |aamI 0d\n";
+	$returnString .= ".001. |a$flexKey\n";
+	$returnString .= ".008. |a".$date."nuuuu    xx            000 u und u\n"; # like 120831
+	$returnString .= ".035.   |a$oclcNumber\n"; # like (OCoLC)32013207
+	$returnString .= ".852.   |aCNEDM\n";
+	return $returnString;
 }
 
 #
