@@ -213,6 +213,17 @@ sub logit
 	print LOG getTimeStamp(1) . " $msg\n";
 }
 
+#
+# Trim function to remove whitespace from the start and end of the string.
+# param:  string to trim.
+# return: string without leading or trailing spaces.
+sub trim($)
+{
+	my $string = shift;
+	$string =~ s/^\s+//;
+	$string =~ s/\s+$//;
+	return $string;
+}
 
 # Kicks off the setting of various switches.
 # param:  
@@ -271,13 +282,46 @@ if ($opt{'D'})
 	# Select the history files we need. If the requested files are from April 5 onward, we need to specify /{HIST}/201105.hist.Z
 	my @histLogs = getRelevantHistoryLogFiles();
 	# collect codes of deleted items.
-	my $deletedItemKeys = collectDeletedItems( @histLogs );
-	# the deleted items are lines from the history file - one for each record.
+	my $allFlexKeysFromHistory = collectDeletedItems( @histLogs );	
+	# Now we will check for call nums that arn't in the catalog since those are are the flexkeys 
+	# for titles that no longer exist, and by definition, have been deleted.
+	my $initialFlexKeyFile       = qq{tmp_a};
+	my $flexKeysNotInCatalogFile = qq{tmp_b};
+	open( ALL_FLEX_KEYS, ">$initialFlexKeyFile" ) or die "Unable to write to '$initialFlexKeyFile': $!\n";
+	while ( my ( $key, $value ) = each( %$allFlexKeysFromHistory ) )
+	{
+		print ALL_FLEX_KEYS "$key|$value\n";
+	}
+	close( ALL_FLEX_KEYS );
+	# now read all the cat keys into selcatalog so we can catch the error.
+	`cat $initialFlexKeyFile | selcatalog -iF 2>$flexKeysNotInCatalogFile`;
+	# if the file wasn't created or had no entries then there are no deletes to do.
+	if ( not -s $flexKeysNotInCatalogFile )
+	{
+		logit( "no deletes found for date selection" );
+		exit 1;
+	}
+	# parse out the flex key from the error message
+	my $deletedFlexKeys;
+	open( DELETED_FLEX_KEYS, "<$flexKeysNotInCatalogFile" ) or die "Couldn't open '$flexKeysNotInCatalogFile': $!\n";
+	while (<DELETED_FLEX_KEYS>)
+	{
+		# now parse out the flex key from: **error number 111 on catalog not found, key=526625 flex=ADI-7542
+		next if ( not m/flex=/ ); # because there are sirsi codes at the bottom, so skip them
+		my $deletedFlexKey = trim( substr( $_, ( index( $_, "flex=" ) + length( "flex=" )) ) );
+		chomp $deletedFlexKey;
+		# look it up in the allFlexKeysFromHistory hash reference.
+		$deletedFlexKeys->{ $deletedFlexKey } = $allFlexKeysFromHistory->{ $deletedFlexKey };
+	}
+	close( DELETED_FLEX_KEYS );
+	unlink( $initialFlexKeyFile );
+	unlink( $flexKeysNotInCatalogFile );
+	logit( "total deleted titles: " . scalar ( keys( %$deletedFlexKeys ) ) );
 	#### Blow away pre-existing file (from today).
 	open( MASTER_MARC, ">$catalogKeys" ) or die "Unable to write to '$catalogKeys' to write deleted items: $!\n";
-	while ( my ( $key, $value ) = each( %$deletedItemKeys ) )
+	while ( my ( $flexKey, $oclcCode ) = each( %$deletedFlexKeys ) )
 	{
-		print MASTER_MARC "$key|$value\n";
+		print MASTER_MARC "$flexKey|$oclcCode\n";
 	}
 	close( MASTER_MARC );
 	my $fileCounts = splitFile( $maxRecords, $date, $catalogKeys );
@@ -285,6 +329,7 @@ if ($opt{'D'})
 	logit( "-D finished" ) if ( $opt{'t'} );
 	exit 1;
 }
+
 
 #*** DOCUMENT BOUNDARY ***
 #FORM=MARC
@@ -320,6 +365,7 @@ sub makeMARC
 		`cat $outputFileFlat | flatskip -aMARC -if -om > $outputFileName 2>>$APILogfilename`;
 		logit( "converted '$outputFileFlat' to MARC" );
 		# create a label for the file.
+		unlink( $outputFileFlat );
 		createOCLCLableFiles( $fileName, $numRecords, $projectIdCancel );
 	}
 	logit( "dumping of MARC records finished" ) if ( $opt{'t'} );
@@ -350,7 +396,6 @@ sub collectDeletedItems
 {
 	my @logFiles = @_;
 	my $items;
-	open( ITEMS, ">items.log" ) or die "$!\n";
 	foreach my $file ( @logFiles )
 	{
 		my $result = `gzgrep FVFF $file`;
@@ -361,11 +406,9 @@ sub collectDeletedItems
 			{
 				my ( $flexKey, $oclcNumber ) = getFlexKeyOCLCNumberPair( $logLine );
 				$items->{ $flexKey } = $oclcNumber;
-				print ITEMS "$logLine\n";
 			}
 		}
 	}
-	close( ITEMS );
 	print "found ".scalar( keys( %$items ) )." in logs \n";
 	return $items;
 }
@@ -424,7 +467,7 @@ sub getRelevantHistoryLogFiles
 	if ( $end eq $date )
 	{
 		# append today's log which looks like 20120904.hist
-		print " $end matches today's date.\n";
+		print " $end matches today's date.\n" if ( $opt{'t'} );
 		push ( @logs, "$directory$date.hist" );
 	}
 	logit( "found the following logs that match date criteria: @logs" );
