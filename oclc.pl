@@ -4,15 +4,20 @@
 # Method:  EPL's catalog MARC records are uploaded monthly to OCLC for 
 #          the purposes of searching and other InterLibrary Loans (ILL).
 #
-# Steps (each explained later):
+# Steps (each explained later) for uploading Adds and Changes (MIXED) project:
 # 1) oclc.pl -a [-d"start,end"]
 # 2) oclc.pl -s $defaultCatKeysFile
 # 3) oclc.pl -c
 # 4) oclc.pl -f
 #
+# Steps (also explained later) for uploading deletes (CANCELS) project:
+# 1) oclc.pl -D [-d"start,end"]
+#
 # Author:  Andrew Nisbet
 # Date:    June 4, 2012
-# Rev:     0.0 - develop
+# Rev:     
+#          0.1 - Beta includes deletes (CANCELS).
+#          0.0 - develop
 ########################################################################
 
 use strict;
@@ -22,7 +27,7 @@ use Getopt::Std;
 use File::Basename;  # Used in ftp() for local and remote file identification.
 use POSIX;           # for ceil()
 
-my $VERSION = 0.0;
+my $VERSION = 0.1;
 ##### function must be first because logging uses it almost immediately.
 # Returns a timestamp for the log file only. The Database uses the default
 # time of writing the record for its timestamp in SQL. That was done to avoid
@@ -258,6 +263,7 @@ init();
 
 # If the user specified a specific file to split. It will split
 # ANY text file into 90000 line files.
+######## TODO test -A ########
 if ($opt{'A'})
 {
 	logit( "-A started" ) if ( $opt{'t'} );
@@ -333,6 +339,9 @@ if ($opt{'D'})
 	close( MASTER_MARC );
 	my $fileCounts = splitFile( $maxRecords, $date, $catalogKeys );
 	makeMARC( $fileCounts );
+	my @fileList = selectFTPList();
+	# FTP the files
+	# logit( "ftp successful" ) if ( ftp( $ftpUrl, $ftpDir, $userName, $password, @fileList ) );
 	logit( "-D finished" ) if ( $opt{'t'} );
 	exit 1;
 }
@@ -497,7 +506,7 @@ sub collectDeletedItems
 			$searchIsOn = 0 if ( $searchIsOn and $logLine =~ m/^E($myEndDate)/ );
 			if ( $searchIsOn )
 			{
-				if ( $logLine =~ m/\^aA/ )
+				if ( $logLine =~ m/\^aA\(OCoLC\)/ or $logLine =~ m/\^aA\(Sirsi\)/ or $logLine =~ m/\^aAocm/ )
 				{
 					my ( $flexKey, $oclcNumber ) = getFlexKeyOCLCNumberPair( $logLine );
 					$items->{ $flexKey } = $oclcNumber;
@@ -505,7 +514,7 @@ sub collectDeletedItems
 			}
 		}
 	}
-	print "found ".scalar( keys( %$items ) )." in logs \n";
+	logit( "found ".scalar( keys( %$items ) )." in logs" );
 	return $items;
 }
 
