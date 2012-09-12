@@ -341,7 +341,7 @@ if ($opt{'D'})
 	makeMARC( $fileCounts );
 	my @fileList = selectFTPList();
 	# FTP the files
-	# logit( "ftp successful" ) if ( ftp( $ftpUrl, $ftpDir, $userName, $password, @fileList ) );
+	logit( "ftp successful" ) if ( ftp( $ftpUrl, $ftpDir, $userName, $password, @fileList ) );
 	logit( "-D finished" ) if ( $opt{'t'} );
 	exit 1;
 }
