@@ -340,6 +340,7 @@ if ($opt{'D'})
 	my $fileCounts = splitFile( $maxRecords, $date, $catalogKeys );
 	makeMARC( $fileCounts );
 	my @fileList = selectFTPList();
+	my $password = getPassword( $passwordPath );
 	# FTP the files
 	logit( "ftp successful" ) if ( ftp( $ftpUrl, $ftpDir, $userName, $password, @fileList ) );
 	logit( "-D finished" ) if ( $opt{'t'} );
