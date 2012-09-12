@@ -12,6 +12,7 @@
 #
 # Steps (also explained later) for uploading deletes (CANCELS) project:
 # 1) oclc.pl -D [-d"start,end"]
+# 2) oclc.pl -f
 #
 # Author:  Andrew Nisbet
 # Date:    June 4, 2012
@@ -276,13 +277,7 @@ if ($opt{'A'})
 	logit( "'$defaultCatKeysFile' split into " . keys( %$fileCounts ) . " parts" );
 	# create the catalog dump of the keys for each set.
 	dumpCatalog( $fileCounts );
-	# get the list of files to FTP.
-	my @fileList = selectFTPList();
-	# FTP the files
-	# logit( "ftp successful" ) if ( ftp( $ftpUrl, $ftpDir, $userName, $password, @fileList ) );
-	# Test ftp site.
-	# TODO ######################## change for production ##############################
-	logit( "ftp successful" ) if ( ftp( "ftp.epl.ca", "atest", "mark", "R2GnBVtt", @fileList ) );
+	print "=== Please FTP files manually. Check -x option for more details ===\n";
 	logit( "-A finished" ) if ( $opt{'t'} );
 	exit 1;
 }
@@ -339,10 +334,7 @@ if ($opt{'D'})
 	close( MASTER_MARC );
 	my $fileCounts = splitFile( $maxRecords, $date, $catalogKeys );
 	makeMARC( $fileCounts );
-	my @fileList = selectFTPList();
-	my $password = getPassword( $passwordPath );
-	# FTP the files
-	logit( "ftp successful" ) if ( ftp( $ftpUrl, $ftpDir, $userName, $password, @fileList ) );
+	print "=== Please FTP files manually. Check -x option for more details ===\n";
 	logit( "-D finished" ) if ( $opt{'t'} );
 	exit 1;
 }
