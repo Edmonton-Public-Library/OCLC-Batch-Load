@@ -73,14 +73,14 @@ sub getTimeStamp
 		return "$year$mon$mday";
 	}
 }
-##### Server side parameters
+##### Server (OCLC) side parameters
 my $edxAccount     = qq{cnedm};
 my $projectIdMixed = qq{P012569};
 my $projectIdCancel= qq{P012570};
 my $userName       = "t".$edxAccount."1";      # User name.
 my $ftpUrl         = qq{edx.oclc.org};
 my $ftpDir         = qq{edx.ebsb.$edxAccount.ftp};
-##### Client side parameters
+##### Client (our) side parameters
 my $maxRecords     = 16000;            # Max number records we can upload at a time, use -s to change.
 my $date           = getTimeStamp;     # current date in ascii.
 my $oclcDir        = "."; #qq{/s/sirsi/Unicorn/EPLwork/OCLC};
@@ -90,6 +90,11 @@ my $logFile        = qq{$logDir/oclc$date.log};  # Name and location of the log 
 my $catalogKeys    = qq{catalog_keys.lst}; # master list of catalog keys.
 my $APILogfilename = qq{oclcAPI.log};
 my $defaultCatKeysFile = qq{cat_keys.lst};
+# preset these values and getDateBounds() will redefine then as necessary.
+my $startDate = `transdate -d-30`;
+chomp( $startDate );
+my $endDate   = `transdate -d-0`;
+chomp( $endDate );
 open LOG, ">>$logFile";
 
 # Prints usage message then exits.
@@ -246,6 +251,8 @@ sub init
 	{
 		createStandAloneLabelFile( $opt{'m'}, $projectIdMixed );
 	}
+	# set dates conditionally on default or user specified dates.
+	getDateBounds();
 }
 init();
 
@@ -330,150 +337,6 @@ if ($opt{'D'})
 	exit 1;
 }
 
-
-#*** DOCUMENT BOUNDARY ***
-#FORM=MARC
-#.000. |aamI 0d
-#.001. |aACY-7433
-#.008. |a120831nuuuu    xx            000 u und u
-#.035.   |a(OCoLC)30913700
-#.852.   |aCNEDM
-#
-#
-sub makeMARC
-{
-	my $flexOclcHashRef = $_[0];
-	my $fileCountHashRef = $_[0];
-	logit( "dumping MARC records" ) if ( $opt{'t'} );
-	while( my ($fileName, $numRecords) = each %$fileCountHashRef )
-	{
-		# open and read the keys in the file
-		
-		my $outputFileName = qq{DATA.D$fileName};
-		my $outputFileFlat = "$outputFileName.flat";
-		logit( "dumping keys found in '$fileName' to '$outputFileFlat'" );
-		open( SPLIT_FILE, "<$fileName" ) or die "unable to open split file '$fileName': $!\n";
-		open( MARC_FILE, ">$outputFileFlat" ) or die "unable to write to '$outputFileFlat': $!\n";
-		while (<SPLIT_FILE>)
-		{
-			chomp( $_ );
-			print MARC_FILE getFlatMARC( $_, $date );
-		}
-		close( MARC_FILE );
-		close( SPLIT_FILE );
-		# convert with flatskip.
-		`cat $outputFileFlat | flatskip -aMARC -if -om > $outputFileName 2>>$APILogfilename`;
-		logit( "converted '$outputFileFlat' to MARC" );
-		# create a label for the file.
-		unlink( $outputFileFlat );
-		createOCLCLableFiles( $fileName, $numRecords, $projectIdCancel );
-	}
-	logit( "dumping of MARC records finished" ) if ( $opt{'t'} );
-}
-
-#
-#
-#
-sub getFlatMARC
-{
-	my ( $record, $date ) = @_;
-	my ( $flexKey, $oclcNumber ) = split( '\|', $record );
-	my $returnString = "*** DOCUMENT BOUNDARY ***\n";
-	$returnString .= "FORM=MARC\n";
-	$returnString .= ".000. |aamI 0d\n";
-	$returnString .= ".001. |a$flexKey\n";
-	$returnString .= ".008. |a".$date."nuuuu    xx            000 u und u\n"; # like 120831
-	$returnString .= ".035.   |a$oclcNumber\n"; # like (OCoLC)32013207
-	$returnString .= ".852.   |aCNEDM\n";
-	return $returnString;
-}
-
-#
-# Search the arg list of log files for entries of remove item (FV) and remove title option (NOY).
-# param:  log files List - list of log files to search.
-# return: Hash reference of cat keys as key and history log entry as value.
-sub collectDeletedItems
-{
-	my @logFiles = @_;
-	my $items;
-	foreach my $file ( @logFiles )
-	{
-		my $result = `gzgrep FVFF $file`;
-		my @potentialItems  = split( '\n', $result );
-		foreach my $logLine ( @potentialItems )
-		{
-			if ( $logLine =~ m/\^NOY/ and $logLine =~ m/\^aA\(OCoLC\)/ )
-			{
-				my ( $flexKey, $oclcNumber ) = getFlexKeyOCLCNumberPair( $logLine );
-				$items->{ $flexKey } = $oclcNumber;
-			}
-		}
-	}
-	print "found ".scalar( keys( %$items ) )." in logs \n";
-	return $items;
-}
-
-# Returns the flex key and oclc number pair.
-# param:  log record line string.
-# return: (key, value) flexkey and oclc number.
-sub getFlexKeyOCLCNumberPair
-{
-	my $logRecord = $_[0];
-	my $key;
-	my $value;
-	my @entries = split( /\^/, $logRecord );
-	foreach my $entry ( @entries )
-	{
-		$key   = $entry if ( $entry =~ s/^IU// );
-		$value = $entry if ( $entry =~ s/^aA// );
-	}
-	return ( $key, $value );
-}
-
-#
-# Returns a list of History logs that are required to meet the date criteria.
-# param:  
-# return: fully qualified paths of the history files required by date criteria.
-sub getRelevantHistoryLogFiles
-{
-	# get the inclusive dates and an entire list of history files from the hist directory.
-	# find the history files that are >= the start date and <= end date and place them on a list.
-	# if the end date is today's date then we need to add a specially named log file that looks like
-	# 20120904.hist
-	my @logs = ();
-	my $dateBounds = getDateBounds();
-	my $date       = `transdate -d-0`;
-	chomp( $date );
-	# ">$startDate<$endDate"
-	$dateBounds =~ s/>//;
-	my ( $start, $end ) = split( "<", $dateBounds );
-	# Start will be the first 6 chars of an ANSI date: 20120805 and 20120904
-	my $startFileName = substr( $start, 0, 6 );
-	my $endFileName   = substr( $end,   0, 6 );
-	my $path = `getpathname hist`;
-	chomp( $path );
-	my @fileList = <$path/*.Z>;
-	my ($fileName, $directory, $suffix);
-	foreach my $file ( @fileList )
-	{
-		($fileName, $directory, $suffix) = fileparse( $file );
-		my $nameDate = substr( $fileName, 0, 6 );
-		if ( scalar( $nameDate ) >= scalar( $startFileName ) and scalar( $nameDate ) <= scalar( $endFileName ))
-		{
-			push( @logs, $file );
-		}
-	}
-	# for today's log file we have to compose the file name
-	if ( $end eq $date )
-	{
-		# append today's log which looks like 20120904.hist
-		print " $end matches today's date.\n" if ( $opt{'t'} );
-		push ( @logs, "$directory$date.hist" );
-	}
-	logit( "found the following logs that match date criteria: @logs" );
-	return @logs;
-}
-
 #
 # Select the catalog keys for the items that we are going to upload to OCLC.
 # param:  
@@ -551,6 +414,157 @@ close(LOG);
 1; # exit with successful status.
 
 # ======================== Functions =========================
+#*** DOCUMENT BOUNDARY ***
+#FORM=MARC
+#.000. |aamI 0d
+#.001. |aACY-7433
+#.008. |a120831nuuuu    xx            000 u und u
+#.035.   |a(OCoLC)30913700
+#.852.   |aCNEDM
+#
+#
+sub makeMARC
+{
+	my $flexOclcHashRef = $_[0];
+	my $fileCountHashRef = $_[0];
+	logit( "dumping MARC records" ) if ( $opt{'t'} );
+	while( my ($fileName, $numRecords) = each %$fileCountHashRef )
+	{
+		# open and read the keys in the file
+		
+		my $outputFileName = qq{DATA.D$fileName};
+		my $outputFileFlat = "$outputFileName.flat";
+		logit( "dumping keys found in '$fileName' to '$outputFileFlat'" );
+		open( SPLIT_FILE, "<$fileName" ) or die "unable to open split file '$fileName': $!\n";
+		open( MARC_FILE, ">$outputFileFlat" ) or die "unable to write to '$outputFileFlat': $!\n";
+		while (<SPLIT_FILE>)
+		{
+			chomp( $_ );
+			print MARC_FILE getFlatMARC( $_, $date );
+		}
+		close( MARC_FILE );
+		close( SPLIT_FILE );
+		# convert with flatskip.
+		`cat $outputFileFlat | flatskip -aMARC -if -om > $outputFileName 2>>$APILogfilename`;
+		logit( "converted '$outputFileFlat' to MARC" );
+		# create a label for the file.
+		unlink( $outputFileFlat );
+		createOCLCLableFiles( $fileName, $numRecords, $projectIdCancel );
+	}
+	logit( "dumping of MARC records finished" ) if ( $opt{'t'} );
+}
+
+#
+#
+#
+sub getFlatMARC
+{
+	my ( $record, $date ) = @_;
+	my ( $flexKey, $oclcNumber ) = split( '\|', $record );
+	my $returnString = "*** DOCUMENT BOUNDARY ***\n";
+	$returnString .= "FORM=MARC\n";
+	$returnString .= ".000. |aamI 0d\n";
+	$returnString .= ".001. |a$flexKey\n";
+	$returnString .= ".008. |a".$date."nuuuu    xx            000 u und u\n"; # like 120831
+	$returnString .= ".035.   |a$oclcNumber\n"; # like (OCoLC)32013207
+	$returnString .= ".852.   |aCNEDM\n";
+	return $returnString;
+}
+
+#
+# Search the arg list of log files for entries of remove item (FV) and remove title option (NOY).
+# param:  log files List - list of log files to search.
+# return: Hash reference of cat keys as key and history log entry as value.
+sub collectDeletedItems
+{
+	my @logFiles = @_;
+	my $items;
+	my $searchIsOn = 0;
+	# to stop when it reaches the endDate, but collect all the values including the endDate so select records of the endDate +1.
+	my $myEndDate = `transdate -p$endDate+1`;
+	chomp( $myEndDate );
+	while ( @logFiles )
+	{
+		my $file = shift( @logFiles );
+		my $result = `gzgrep FVFF $file`;
+		my @potentialItems  = split( '\n', $result );
+		foreach my $logLine ( @potentialItems )
+		{
+			# Note that in the .035. record below, (Sirsi) numbers are output if there is no OCLC number.
+			# If a OCLC number exists it is output regardless of if a Sirsi number exists. If one doesn't 
+			# exist then the Sirsi number is output.
+			$searchIsOn = 1 if ( not $searchIsOn and $logLine =~ m/^E($startDate)/ );
+			$searchIsOn = 0 if ( $searchIsOn and $logLine =~ m/^E($myEndDate)/ );
+			if ( $searchIsOn )
+			{
+				if ( $logLine =~ m/\^NOY/ and ( $logLine =~ m/\^aA\(OCoLC\)/ or $logLine =~ m/\^aA\(Sirsi\)/ ) )
+				{
+					my ( $flexKey, $oclcNumber ) = getFlexKeyOCLCNumberPair( $logLine );
+					$items->{ $flexKey } = $oclcNumber;
+				}
+			}
+		}
+	}
+	print "found ".scalar( keys( %$items ) )." in logs \n";
+	return $items;
+}
+
+# Returns the flex key and oclc number pair.
+# param:  log record line string.
+# return: (key, value) flexkey and oclc number.
+sub getFlexKeyOCLCNumberPair
+{
+	my $logRecord = $_[0];
+	my $key;
+	my $value;
+	my @entries = split( /\^/, $logRecord );
+	foreach my $entry ( @entries )
+	{
+		$key   = $entry if ( $entry =~ s/^IU// );
+		$value = $entry if ( $entry =~ s/^aA// );
+	}
+	return ( $key, $value );
+}
+
+#
+# Returns a list of History logs that are required to meet the date criteria.
+# param:  
+# return: fully qualified paths of the history files required by date criteria.
+sub getRelevantHistoryLogFiles
+{
+	# get the inclusive dates and an entire list of history files from the hist directory.
+	# find the history files that are >= the start date and <= end date and place them on a list.
+	# if the end date is today's date then we need to add a specially named log file that looks like
+	# 20120904.hist
+	my @logs = ();
+	my $today       = `transdate -d-0`;
+	chomp( $today );
+	# Start will be the first 6 chars of an ANSI date: 20120805 and 20120904
+	my $startFileName = substr( $startDate, 0, 6 );
+	my $endFileName   = substr( $endDate,   0, 6 );
+	my $path = `getpathname hist`;
+	chomp( $path );
+	my @fileList = <$path/*.Z>;
+	my ($fileName, $directory, $suffix);
+	foreach my $file ( @fileList )
+	{
+		($fileName, $directory, $suffix) = fileparse( $file );
+		my $nameDate = substr( $fileName, 0, 6 );
+		if ( scalar( $nameDate ) >= scalar( $startFileName ) and scalar( $nameDate ) <= scalar( $endFileName ))
+		{
+			push( @logs, $file );
+		}
+	}
+	# for today's log file we have to compose the file name
+	if ( $endDate eq $today )
+	{
+		# append today's log which looks like 20120904.hist
+		print " $endDate matches today's date.\n" if ( $opt{'t'} );
+		push ( @logs, "$directory$date.hist" );
+	}
+	logit( "found the following logs that match date criteria: @logs" );
+	return @logs;
+}
 
 #
 # Selects valid files to FTP to OCLCC. Valid set is a complete set of 
@@ -604,11 +618,9 @@ sub selectFTPList
 sub selectCatKeys
 {
 	logit( "-a started" ) if ( $opt{'t'} );
-	# my $APILogfilename        = qq{oclcAPI.log};
 	my $initialItemCatKeys = qq{tmp_a};
 	my $sortedItemCatKeys  = qq{tmp_b};
 	my $dateRefinedCatKeys = qq{tmp_c};
-	# my $catalogKeys = qq{catalog_keys.lst}; # master list of catalog keys.
 	print "-a selected -run API.\n" if ($opt{'t'});
 	my $unicornItemTypes = "PAPERBACK,JPAPERBACK,BKCLUBKIT,COMIC,DAISYRD,EQUIPMENT,E-RESOURCE,FLICKSTOGO,FLICKTUNE,JFLICKTUNE,JTUNESTOGO,PAMPHLET,RFIDSCANNR,TUNESTOGO,JFLICKTOGO,PROGRAMKIT,LAPTOP,BESTSELLER,JBESTSELLR";
 	logit( "exclude item types: $unicornItemTypes" );
@@ -697,14 +709,10 @@ sub dumpCatalog
 # Not specifying end date defaults to today. The start date is the furthest date back in time.
 # The end date is the most recent.
 # param:  none
-# return: ">startDate<endDate"
+# return: ">=startDate<=endDate"
 #
 sub getDateBounds
 {
-	my $startDate = `transdate -d-30`;
-	chomp( $startDate );
-	my $endDate   = `transdate -d-0`;
-	chomp( $endDate );
 	if  ( $opt{'d'} )
 	{
 		my @dates = split( ',', $opt{'d'});
@@ -717,8 +725,8 @@ sub getDateBounds
 			$endDate = $dates[1];
 		}
 	}
-	logit( "date boundaries set to '>$startDate<$endDate'" );
-	return ">$startDate<$endDate";
+	logit( "date boundaries set to '>=$startDate<=$endDate'" );
+	return ">=$startDate<=$endDate";
 }
 
 #
