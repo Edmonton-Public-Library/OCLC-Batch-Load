@@ -497,7 +497,7 @@ sub collectDeletedItems
 			$searchIsOn = 0 if ( $searchIsOn and $logLine =~ m/^E($myEndDate)/ );
 			if ( $searchIsOn )
 			{
-				if ( $logLine =~ m/\^NOY/ and ( $logLine =~ m/\^aA\(OCoLC\)/ or $logLine =~ m/\^aA\(Sirsi\)/ ) )
+				if ( $logLine =~ m/\^aA/ )
 				{
 					my ( $flexKey, $oclcNumber ) = getFlexKeyOCLCNumberPair( $logLine );
 					$items->{ $flexKey } = $oclcNumber;
@@ -521,7 +521,12 @@ sub getFlexKeyOCLCNumberPair
 	foreach my $entry ( @entries )
 	{
 		$key   = $entry if ( $entry =~ s/^IU// );
-		$value = $entry if ( $entry =~ s/^aA// );
+		if ( $entry =~ s/^aA// )
+		{
+			$entry =~ s/\s//g;        # get rid of whitespace.
+			$entry =~ s/Sirsi/OCoLC/; # Change sirsi id to OCoLC prefix.
+			$value = $entry;
+		}
 	}
 	return ( $key, $value );
 }
