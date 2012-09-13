@@ -17,6 +17,8 @@
 # Author:  Andrew Nisbet
 # Date:    June 4, 2012
 # Rev:     
+#          0.2 - Includes new features such as a clean up switch, and 
+#                OCLC number overlay.
 #          0.1 - Beta includes deletes (CANCELS).
 #          0.0 - develop
 ########################################################################
@@ -28,7 +30,7 @@ use Getopt::Std;
 use File::Basename;  # Used in ftp() for local and remote file identification.
 use POSIX;           # for ceil()
 
-my $VERSION = 0.1;
+my $VERSION = 0.2;
 ##### function must be first because logging uses it almost immediately.
 # Returns a timestamp for the log file only. The Database uses the default
 # time of writing the record for its timestamp in SQL. That was done to avoid
@@ -96,6 +98,7 @@ my $logFile        = qq{$logDir/oclc$date.log};  # Name and location of the log 
 my $catalogKeys    = qq{catalog_keys.lst}; # master list of catalog keys.
 my $APILogfilename = qq{oclcAPI.log};
 my $defaultCatKeysFile = qq{cat_keys.lst};
+my $reportOutput   = qq{overlay_records.flat};
 # preset these values and getDateBounds() will redefine then as necessary.
 my $startDate = `transdate -d-30`;
 chomp( $startDate );
@@ -118,7 +121,7 @@ To run the process manually do:
 3) oclc.pl -c
 4) oclc.pl -f
 
-usage: $0 [-acADtx] [-r file] [-s file] [-f files] [-z <n>] [-d"[start_date],[end_date]"] [-[lm] file]
+usage: $0 [-acADtux] [-r file] [-s file] [-f files] [-z <n>] [-d"[start_date],[end_date]"] [-[lm] file]
 
  -a            : Run the API commands to generate a file of catalog keys called $catalogKeys.
                  If -t is selected, the intermediate temporary files are not deleted.
@@ -132,14 +135,16 @@ usage: $0 [-acADtx] [-r file] [-s file] [-f files] [-z <n>] [-d"[start_date],[en
                  modify dates. Defaults to one month ago as specified by 'transdate -m-1' and 
 				 today's date for an end date. Both are optional but must be valid ANSI dates or
 				 the defaults are used.
- -t            : Debug
  -f            : Finds DATA and matching LABEL files in current directory, and FTPs them to OCLC.
  -lyymmdd.LAST : Create a label file for a given CANCEL or Delete file. NOTE: use the yymmdd.FILEn, or yymmdd.LAST
                  since $0 needs to count the number of records; the DATA.D MARC file has 1 line.
  -myymmdd.LAST : Create a label file for a given MIXED or adds/changes project file. NOTE: use the yymmdd.FILEn,
                  or yymmdd.LAST since $0 needs to count the number of records; the DATA.D MARC file has 1 line.
+ -u            : Updates bibrecords with missing OCLC numbers extracted from OCLC CrossRef Reports 
+                 (like D120913.R468704.XREFRPT.txt).
  -r [file]     : Creates a MARC DATA.D file ready for uploading from a given flex keys file (like 120829.FILE5).
  -s [file]     : Split input into maximum number of records per DATA file(default 90000).
+ -t            : Debug
  -x            : This (help) message.
  -z [int]      : Set the maximum output file size in lines, not bytes, this allows for splitting 
                  a set of catalogue keys into sets of 90000 records, which are then piped to catalogdump.
@@ -242,7 +247,7 @@ sub trim($)
 # return: 
 sub init
 {
-    my $opt_string = 'AactDd:fl:m:xr:s:z:';
+    my $opt_string = 'AactDd:fl:m:xr:s:tuz:';
     getopts( "$opt_string", \%opt ) or usage();
     usage() if ($opt{'x'});
 	if ( $opt{'z'} )
@@ -263,10 +268,48 @@ sub init
 		createStandAloneMARCFile( $opt{'r'} );
 		exit( 1 );
 	}
+	if ( $opt{'u'} )# create a MARC file and LABEL file for uploading from a [date].LAST file.
+	{
+		exit( 0 ) if ( not overlayOCLCControlNumber( ) );
+		exit( 1 );
+	}
 	# set dates conditionally on default or user specified dates.
 	getDateBounds();
 }
 init();
+
+# bash-3.00$ head D120906.R466902.XREFRPT.txt
+#     OCLC XREF REPORT
+#
+#  OCLC        Submitted
+#  Control #   001 Field
+# 727705591    2011023163
+# 795038896    2011033697
+# 809219600    2011033698
+# 746489730    2011033699
+# 746489731    2011033700
+# 746489732    2011033701
+sub overlayOCLCControlNumber
+{
+	# find all the files that match the D120906.R466902.XREFRPT.txt file name.
+	my @fileList = <D[0-9][0-9][0-9][0-9][0-9][0-9]\.R*>;
+	logit( "found ".scalar( @fileList )." reports: @fileList" );
+	# open output file.
+	open( MARC_FLAT, ">$reportOutput" ) or die "Error: unable to open '$reportOutput': $!\n";
+	while ( @fileList )
+	{
+		# separate the XREFRPT files.
+		my $file = shift( @fileList );
+		next if ( $file !~ m/XREFRPT/ );
+		open( REPORT, "<$file" ) or die "Error: unable to open '$file': $!\n";
+		# read report and create a flexkey|OCoLC number list.
+		# cat that file to selcatalog to get the cat keys and output the -oCS, where S is the (OCoLC)number.
+		# take that file and use editmarc to update the .035. records as per Chris's instructions for Theatre in Video.
+		my @records = <REPORT>;
+		close( REPORT );
+	}
+	return 1;
+}
 
 # If the user specified a specific file to split. It will split
 # ANY text file into 90000 line files.
