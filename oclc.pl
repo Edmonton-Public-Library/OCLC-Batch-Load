@@ -118,7 +118,7 @@ To run the process manually do:
 3) oclc.pl -c
 4) oclc.pl -f
 
-usage: $0 [-acADtx] [-s file] [-f files] [-z <n>] [-d"[start_date],[end_date]"] [-[lm] file]
+usage: $0 [-acADtx] [-r file] [-s file] [-f files] [-z <n>] [-d"[start_date],[end_date]"] [-[lm] file]
 
  -a            : Run the API commands to generate a file of catalog keys called $catalogKeys.
                  If -t is selected, the intermediate temporary files are not deleted.
@@ -138,6 +138,7 @@ usage: $0 [-acADtx] [-s file] [-f files] [-z <n>] [-d"[start_date],[end_date]"] 
                  since $0 needs to count the number of records; the DATA.D MARC file has 1 line.
  -myymmdd.LAST : Create a label file for a given MIXED or adds/changes project file. NOTE: use the yymmdd.FILEn,
                  or yymmdd.LAST since $0 needs to count the number of records; the DATA.D MARC file has 1 line.
+ -r [file]     : Creates a MARC DATA.D file ready for uploading from a given flex keys file (like 120829.FILE5).
  -s [file]     : Split input into maximum number of records per DATA file(default 90000).
  -x            : This (help) message.
  -z [int]      : Set the maximum output file size in lines, not bytes, this allows for splitting 
@@ -241,7 +242,7 @@ sub trim($)
 # return: 
 sub init
 {
-    my $opt_string = 'AactDd:fl:m:xs:z:';
+    my $opt_string = 'AactDd:fl:m:xr:s:z:';
     getopts( "$opt_string", \%opt ) or usage();
     usage() if ($opt{'x'});
 	if ( $opt{'z'} )
@@ -256,6 +257,11 @@ sub init
 	if ( $opt{'m'} )# expects <yymmdd>.FILEn for mixed project id.
 	{
 		createStandAloneLabelFile( $opt{'m'}, $projectIdMixed );
+	}
+	if ( $opt{'r'} )# create a MARC file and LABEL file for uploading from a [date].LAST file.
+	{
+		createStandAloneMARCFile( $opt{'r'} );
+		exit( 1 );
 	}
 	# set dates conditionally on default or user specified dates.
 	getDateBounds();
@@ -427,10 +433,11 @@ close(LOG);
 #.035.   |a(OCoLC)30913700
 #.852.   |aCNEDM
 #
-#
+# param:  HashRef of file names and lengths
+# return: 
+# side effect: creates MARC file and LABEL.
 sub makeMARC
 {
-	my $flexOclcHashRef = $_[0];
 	my $fileCountHashRef = $_[0];
 	logit( "dumping MARC records" ) if ( $opt{'t'} );
 	while( my ($fileName, $numRecords) = each %$fileCountHashRef )
@@ -839,6 +846,32 @@ sub splitFile
 	close(INPUT);
 	logit( "splitFile finished" ) if ( $opt{'t'} );
 	return $fileSizeRef;
+}
+
+# Creates a valid OCLC MARC file and LABEL for upload for Cancels projects.
+# param:  file string - name of the file with fully qualified path
+# return: 
+# side effect: creates MARC file and LABEL file.
+sub createStandAloneMARCFile
+{
+	my ( $file ) = @_;
+	if ( $file =~ m/\d[6]/ )
+	{
+		logit( "looks like '$file' is not a valid Cancels data file name. Exiting" );
+		exit( 0 );
+	}
+	logit( "creating Cancels file from '$file'" );
+	# we need $dataFileName, $numRecords so 
+	open( DATA, "<$file" ) or die "Error opening '$file': $!\n";
+	my $lineCount = 0;
+	while(<DATA>)
+	{
+		$lineCount++;
+	}
+	close( DATA );
+	my $fileHashRef;
+	$fileHashRef->{$file} = $lineCount;
+	makeMARC( $fileHashRef );
 }
 
 # Creates a valid OCLC label file for a specific project type. Projects are either 
