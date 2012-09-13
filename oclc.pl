@@ -322,8 +322,11 @@ if ($opt{'D'})
 		$deletedFlexKeys->{ $deletedFlexKey } = $allFlexKeysFromHistory->{ $deletedFlexKey };
 	}
 	close( DELETED_FLEX_KEYS );
-	unlink( $initialFlexKeyFile );
-	unlink( $flexKeysNotInCatalogFile );
+	if ( not $opt{'t'} )
+	{
+		unlink( $initialFlexKeyFile );
+		unlink( $flexKeysNotInCatalogFile );
+	}
 	logit( "total deleted titles: " . scalar ( keys( %$deletedFlexKeys ) ) );
 	#### Blow away pre-existing file (from today).
 	open( MASTER_MARC, ">$catalogKeys" ) or die "Unable to write to '$catalogKeys' to write deleted items: $!\n";
