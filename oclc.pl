@@ -125,7 +125,7 @@ usage: $0 [-acADtx] [-s file] [-f files] [-z <n>] [-d"[start_date],[end_date]"] 
  -A            : Do everything: run api catalog dump, split to default sized
                  files and upload the split files and labels. Same as running
 			     -a -f 
- -c            : Catalog dump the cat keys found in any data files (like DATA.D120829.FILE5) 
+ -c            : Catalog dump the cat keys found in any data files (like 120829.FILE5) 
                  in the current directory, replacing the contents with the dumped catalog records.
  -D            : Creates deleted items for OCLC upload. Like -A but for deletes. 
  -d [start,end]: Comma separated start and end date. Restricts search for items by create and 
@@ -279,7 +279,7 @@ if ($opt{'A'})
 	dumpCatalog( $fileCounts );
 	print "=== Please FTP files manually. Check -x option for more details ===\n";
 	logit( "-A finished" ) if ( $opt{'t'} );
-	exit 1;
+	exit 1; # because running other commnads clobbers the files you just created.
 }
 
 # Creates and uploads the delete items for OCLC.
@@ -336,7 +336,7 @@ if ($opt{'D'})
 	makeMARC( $fileCounts );
 	print "=== Please FTP files manually. Check -x option for more details ===\n";
 	logit( "-D finished" ) if ( $opt{'t'} );
-	exit 1;
+	exit 1; # because running other commnads clobbers the files you just created.
 }
 
 #
