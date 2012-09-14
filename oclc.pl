@@ -98,7 +98,7 @@ my $logFile        = qq{$logDir/oclc$date.log};  # Name and location of the log 
 my $catalogKeys    = qq{catalog_keys.lst}; # master list of catalog keys.
 my $APILogfilename = qq{oclcAPI.log};
 my $defaultCatKeysFile = qq{cat_keys.lst};
-my $reportOutput   = qq{overlay_records.flat};
+my $flatUpateFile   = qq{overlay_records.flat};
 # preset these values and getDateBounds() will redefine then as necessary.
 my $startDate = `transdate -d-30`;
 chomp( $startDate );
@@ -140,7 +140,7 @@ usage: $0 [-acADtux] [-r file] [-s file] [-f files] [-z <n>] [-d"[start_date],[e
                  since $0 needs to count the number of records; the DATA.D MARC file has 1 line.
  -myymmdd.LAST : Create a label file for a given MIXED or adds/changes project file. NOTE: use the yymmdd.FILEn,
                  or yymmdd.LAST since $0 needs to count the number of records; the DATA.D MARC file has 1 line.
- -u            : Updates bibrecords with missing OCLC numbers extracted from OCLC CrossRef Reports 
+ -U            : Updates bibrecords with missing OCLC numbers extracted from OCLC CrossRef Reports 
                  (like D120913.R468704.XREFRPT.txt).
  -r [file]     : Creates a MARC DATA.D file ready for uploading from a given flex keys file (like 120829.FILE5).
  -s [file]     : Split input into maximum number of records per DATA file(default 90000).
@@ -247,7 +247,7 @@ sub trim($)
 # return: 
 sub init
 {
-    my $opt_string = 'AactDd:fl:m:xr:s:tuz:';
+    my $opt_string = 'AactDd:fl:m:xr:s:tUz:';
     getopts( "$opt_string", \%opt ) or usage();
     usage() if ($opt{'x'});
 	if ( $opt{'z'} )
@@ -268,7 +268,7 @@ sub init
 		createStandAloneMARCFile( $opt{'r'} );
 		exit( 1 );
 	}
-	if ( $opt{'u'} )# create a MARC file and LABEL file for uploading from a [date].LAST file.
+	if ( $opt{'U'} )# create a MARC file and LABEL file for uploading from a [date].LAST file.
 	{
 		exit( 0 ) if ( not overlayOCLCControlNumber( ) );
 		exit( 1 );
@@ -292,23 +292,82 @@ init();
 sub overlayOCLCControlNumber
 {
 	# find all the files that match the D120906.R466902.XREFRPT.txt file name.
-	my @fileList = <D[0-9][0-9][0-9][0-9][0-9][0-9]\.R*>;
-	logit( "found ".scalar( @fileList )." reports: @fileList" );
+	my @fileList = getMixedReports();
+	logit( "found ".scalar( @fileList )." files" );
 	# open output file.
-	open( MARC_FLAT, ">$reportOutput" ) or die "Error: unable to open '$reportOutput': $!\n";
+	open( MARC_FLAT, ">$flatUpateFile" ) or die "Error: unable to write to '$flatUpateFile': $!\n";
 	while ( @fileList )
 	{
-		# separate the XREFRPT files.
 		my $file = shift( @fileList );
-		next if ( $file !~ m/XREFRPT/ );
+		logit( "reading '$file'" );
+		my $totalRecords = 0;
+		my $keysFound    = 0;
 		open( REPORT, "<$file" ) or die "Error: unable to open '$file': $!\n";
-		# read report and create a flexkey|OCoLC number list.
-		# cat that file to selcatalog to get the cat keys and output the -oCS, where S is the (OCoLC)number.
-		# take that file and use editmarc to update the .035. records as per Chris's instructions for Theatre in Video.
-		my @records = <REPORT>;
+		while (<REPORT>)
+		{
+			my $line = trim( $_ )."\n"; # Trim takes off the white space and newline.
+			# skip blank lines and lines that don't start with numbers 
+			next if ( $line !~ m/^\d/ ); # skip if the line doesn't start with a number.
+			$totalRecords++;
+			# lets split the line on the white space swap the values so the 001 field is first.
+			my @oclc001 = split( /\s{4}/, $line );
+			my $catKey = `echo "$oclc001[1] {001}" | seltext 2>err.log`;
+			if ( $catKey )
+			{
+				$keysFound++;
+				$catKey = substr( $catKey, 0, -2 ); # removes the '\n' and the '|' pipe.
+				print "$catKey\n" if ( $opt{'t'} );
+				print MARC_FLAT get001OverlayMARCRecord( $catKey, $oclc001[0] );
+			}
+		}
 		close( REPORT );
+		logit( "updating $keysFound of $totalRecords records" );
 	}
+	close( MARC_FLAT );
+	# now update all the OCLC numbers
+	`cat $flatUpateFile | catalogmerge -aMARC -fd -if -t035 -r -un -bc 2>err.log` if ( not -z $flatUpateFile );
+	logit( "update of 035 records complete" );
 	return 1;
+}
+
+# Creates a minimalist, but well formed flat MARC record of 001 and 035 fields for overlay.
+# param:  oclc record string oclc number.
+# param:  001 record string catalog 001 field.
+# return: string well formatted flat marc record.
+sub get001OverlayMARCRecord
+{
+	# Updating by cat key is more reliable but produces errors like:
+	# **Entry ID not found in format MARC: 1003
+	# because there is no entry for 1003 in the entry id config for MARC - it's a Sirsi number
+	# not related to MARC records.
+	my ( $catKey, $oclcNumber ) = @_;
+	my $marc = "*** DOCUMENT BOUNDARY ***\n";
+	$marc .= "FORM=MARC\n";
+	$marc .= ".1003. |a$catKey\n"; 
+	$marc .= ".035.   |a(OCoLC)$oclcNumber\n";
+	return $marc;
+}
+
+# Fetch the valid Mixed reports - not Cancels and not summaries.
+# param:  
+# return: list valid reports to parse out OCLC numbers.
+# TODO:   fix so that it ftps reports from psw.oclc.org.
+sub getMixedReports
+{
+	my @fileList = ();
+	my @tmp = <D[0-9][0-9][0-9][0-9][0-9][0-9]\.R*>;
+	# my @tmp = <test.XREFRPT.txt>;
+	while ( @tmp )
+	{
+		# separate the XREFRPT files.
+		my $file = shift( @tmp );
+		# TODO get files from the report site itself with wget --user=100313990 --password=catal http://psw.oclc.org/download.aspx?setd=netbatch
+		# returns a page requesting login.
+		next if ( $file !~ m/XREFRPT/ );
+		push( @fileList, $file );
+	}
+	logit( "found ".scalar( @fileList )." reports: @fileList" );
+	return @fileList;
 }
 
 # If the user specified a specific file to split. It will split
