@@ -319,6 +319,10 @@ sub overlayOCLCControlNumber
 				print "$catKey\n" if ( $opt{'t'} );
 				print MARC_FLAT get001OverlayMARCRecord( $catKey, $oclc001[0] );
 			}
+			else
+			{
+				logit( "SKIPPING 001 '$oclc001[1]' from '$file' key not found" );
+			}
 		}
 		close( REPORT );
 		logit( "updating $keysFound of $totalRecords records" );
