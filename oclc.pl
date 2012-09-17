@@ -311,7 +311,7 @@ sub overlayOCLCControlNumber
 			$totalRecords++;
 			# lets split the line on the white space swap the values so the 001 field is first.
 			my @oclc001 = split( /\s{4}/, $line );
-			my $catKey = `echo "$oclc001[1] {001}" | seltext 2>err.log`;
+			my $catKey = `echo "$oclc001[1] {001}" | seltext -l"BOTH" 2>err.log`;
 			if ( $catKey )
 			{
 				$keysFound++;
