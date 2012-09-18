@@ -466,21 +466,17 @@ sub overlayOCLCControlNumber
 		}
 		close( SEARCH );
 		logit( "found ".scalar( keys %$oclcNumberHash )." unmatched OCLC numbers" );
-		my $catKeyHash = get001CatKeys( $tmpFile );
+		my $catKeyHash = get001CatKeys( $oclcNumberHash, $tmpFile );
 		logit( "seltext found ".scalar( keys %$catKeyHash )." cat keys" );
 		# now match the .001. record to the OCLC number and write it to a flat marc file.
 		open( MARC_FLAT, ">$flatUpateFile" ) or die "Error: unable to write to '$flatUpateFile': $!\n";
-		for my $zzOneRecord ( keys %$catKeyHash )
+		while( my ($catKey, $oclcNumber) = each %$catKeyHash ) 
 		{
-			print MARC_FLAT get001OverlayMARCRecord( $catKeyHash->{ $zzOneRecord }, $oclcNumberHash->{ $zzOneRecord } );;
+			print MARC_FLAT get001OverlayMARCRecord( $catKey, $oclcNumber );
 		}
 		close( MARC_FLAT );
 		logit( "updating catalogue records" );
-		# last;
-		# now update all the OCLC numbers first figure out if there is a 035 record in there to begin with.
-		# DON'T use this as is because it will update records that don't need to be updated. The reports we are 
-		# reading are not exceptions, they are all records. Some will be right. Some are Cancels so we need to 
-		# restrict those from file selection. We may want to go in and REPLACE the .035. records.
+		last;
 		# `cat $flatUpateFile | catalogmerge -aMARC -fd -if -t035 -r -un -bc 2>err.log` if ( not -z $flatUpateFile );
 	}
 	logit( "update of .035. records complete" );
@@ -493,19 +489,39 @@ sub overlayOCLCControlNumber
 # return: hash reference (new) .001.->cat key numbers.
 sub get001CatKeys
 {
-	my ( $oclcNumberFile ) = @_;
+	my ( $oclc001RecordHash, $oclcNumberFile ) = @_;
 	my $hash = {};
-	my $seltextFoundResult = `cat $oclcNumberFile | seltext -lBOTH -oA 2>/dev/null`;
+	my $seltextFoundResult = `cat $oclcNumberFile | seltext -lBOTH -oA | prtmarc.pl -e"035" -oCS 2>/dev/null`;
+	# which looks like this when successful:
+	# 950681|2011033701 {001}|1|2|0|Capilano Branch|LARGEPRINT|0|\a(OCoLC)746489732| 
+	# else when 035 wasn't found:
+	# 950681|-|
 	my @foundCatalogueEntries = split( '\n', $seltextFoundResult );
 	logit( scalar( @foundCatalogueEntries )." found" );
 	foreach my $line ( @foundCatalogueEntries )
 	{
 		my @record = split( '\|', $line );
-		# records that fail look like (CaAE) a862213 {001} and only have one element in the array
-		next if ( @record == 1 );
-		# else the record looks like 568392|(CaAE) a862213 {001}|...
-		my $zzOne = substr( $record[1], 0, -5 );
-		$hash->{ $zzOne } =  $record[0];
+		# else the record looks like this when successful:
+		# 950681|2011033701 {001}|1|2|0|Capilano Branch|LARGEPRINT|0|\a(OCoLC)746489732| 
+		# else when not successful:
+		# 950681|-|
+		# get the 001
+		if ( @record > 3 )
+		{
+			my $zzOne = trim( substr( $record[1], 0, -5 ) );
+			my $oclcNumber = $oclc001RecordHash->{ $zzOne };
+			if ( not $oclcNumber )
+			{
+				print STDERR "Couldn't match '$zzOne' in hash.\n" ;
+				next;
+			}
+			# if the line doesn't have the OCLC number then we need to add it and the cat key to the hash.
+			if ( $line !~ m/($oclcNumber)/ )
+			{
+				my $catKey = $record[0];
+				$hash->{ $catKey } = $oclcNumber;
+			}
+		}
 	}
 	return $hash;
 }
@@ -532,7 +548,7 @@ sub getXRefRecords($)
 	return $hash;
 }
 
-# Creates a minimalist, but well formed flat MARC record of 001 and 035 fields for overlay.
+# Creates a minimal list of well formed flat MARC record of 001 and 035 fields for overlay.
 # param:  oclc record string oclc number.
 # param:  001 record string catalog 001 field.
 # return: string well formatted flat marc record.
