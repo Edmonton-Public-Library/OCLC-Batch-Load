@@ -278,102 +278,6 @@ sub init
 }
 init();
 
-# bash-3.00$ head D120906.R466902.XREFRPT.txt
-#     OCLC XREF REPORT
-#
-#  OCLC        Submitted
-#  Control #   001 Field
-# 727705591    2011023163
-# 795038896    2011033697
-# 809219600    2011033698
-# 746489730    2011033699
-# 746489731    2011033700
-# 746489732    2011033701
-sub overlayOCLCControlNumber
-{
-	# find all the files that match the D120906.R466902.XREFRPT.txt file name.
-	my @fileList = getMixedReports();
-	logit( "found ".scalar( @fileList )." files" );
-	# open output file.
-	open( MARC_FLAT, ">$flatUpateFile" ) or die "Error: unable to write to '$flatUpateFile': $!\n";
-	while ( @fileList )
-	{
-		my $file = shift( @fileList );
-		logit( "reading '$file'" );
-		my $totalRecords = 0;
-		my $keysFound    = 0;
-		open( REPORT, "<$file" ) or die "Error: unable to open '$file': $!\n";
-		while (<REPORT>)
-		{
-			my $line = trim( $_ )."\n"; # Trim takes off the white space and newline.
-			# skip blank lines and lines that don't start with numbers 
-			next if ( $line !~ m/^\d/ ); # skip if the line doesn't start with a number.
-			$totalRecords++;
-			# lets split the line on the white space swap the values so the 001 field is first.
-			my @oclc001 = split( /\s{4}/, $line );
-			my $catKey = `echo "$oclc001[1] {001}" | seltext -l"BOTH" 2>err.log`;
-			if ( $catKey )
-			{
-				$keysFound++;
-				$catKey = substr( $catKey, 0, -2 ); # removes the '\n' and the '|' pipe.
-				print "$catKey\n" if ( $opt{'t'} );
-				print MARC_FLAT get001OverlayMARCRecord( $catKey, $oclc001[0] );
-			}
-			else
-			{
-				logit( "SKIPPING 001 '$oclc001[1]' from '$file' key not found" );
-			}
-		}
-		close( REPORT );
-		logit( "updating $keysFound of $totalRecords records" );
-	}
-	close( MARC_FLAT );
-	# now update all the OCLC numbers
-	`cat $flatUpateFile | catalogmerge -aMARC -fd -if -t035 -r -un -bc 2>err.log` if ( not -z $flatUpateFile );
-	logit( "update of 035 records complete" );
-	return 1;
-}
-
-# Creates a minimalist, but well formed flat MARC record of 001 and 035 fields for overlay.
-# param:  oclc record string oclc number.
-# param:  001 record string catalog 001 field.
-# return: string well formatted flat marc record.
-sub get001OverlayMARCRecord
-{
-	# Updating by cat key is more reliable but produces errors like:
-	# **Entry ID not found in format MARC: 1003
-	# because there is no entry for 1003 in the entry id config for MARC - it's a Sirsi number
-	# not related to MARC records.
-	my ( $catKey, $oclcNumber ) = @_;
-	my $marc = "*** DOCUMENT BOUNDARY ***\n";
-	$marc .= "FORM=MARC\n";
-	$marc .= ".1003. |a$catKey\n"; 
-	$marc .= ".035.   |a(OCoLC)$oclcNumber\n";
-	return $marc;
-}
-
-# Fetch the valid Mixed reports - not Cancels and not summaries.
-# param:  
-# return: list valid reports to parse out OCLC numbers.
-# TODO:   fix so that it ftps reports from psw.oclc.org.
-sub getMixedReports
-{
-	my @fileList = ();
-	my @tmp = <D[0-9][0-9][0-9][0-9][0-9][0-9]\.R*>;
-	# my @tmp = <test.XREFRPT.txt>;
-	while ( @tmp )
-	{
-		# separate the XREFRPT files.
-		my $file = shift( @tmp );
-		# TODO get files from the report site itself with wget --user=100313990 --password=catal http://psw.oclc.org/download.aspx?setd=netbatch
-		# returns a page requesting login.
-		next if ( $file !~ m/XREFRPT/ );
-		push( @fileList, $file );
-	}
-	logit( "found ".scalar( @fileList )." reports: @fileList" );
-	return @fileList;
-}
-
 # If the user specified a specific file to split. It will split
 # ANY text file into 90000 line files.
 ######## TODO test -A ########
@@ -531,6 +435,144 @@ close(LOG);
 1; # exit with successful status.
 
 # ======================== Functions =========================
+
+# bash-3.00$ head D120906.R466902.XREFRPT.txt
+#     OCLC XREF REPORT
+#
+#  OCLC        Submitted
+#  Control #   001 Field
+# 727705591    2011023163
+# 795038896    2011033697
+# 809219600    2011033698
+# 746489730    2011033699
+# 746489731    2011033700
+# 746489732    2011033701
+sub overlayOCLCControlNumber
+{
+	# find all the files that match the D120906.R466902.XREFRPT.txt file name.
+	my @fileList = getMixedReports();
+	my $tmpFile = qq{tmp.a};
+	logit( "found ".scalar( @fileList )." files" );
+	while ( @fileList )
+	{
+		my $file = shift( @fileList );
+		logit( "reading '$file'" );
+		my $oclcNumberHash = getXRefRecords( $file ); # hash contains 001Field->{OCLC#}.
+		# write the search strings for seltext to use.
+		open( SEARCH, ">$tmpFile" ) or die "Couldn't open '$tmpFile' to write: $!\n";
+		for my $key ( keys %$oclcNumberHash )
+		{
+			print SEARCH "$key {001}\n";
+		}
+		close( SEARCH );
+		logit( "found ".scalar( keys %$oclcNumberHash )." unmatched OCLC numbers" );
+		my $catKeyHash = get001CatKeys( $tmpFile );
+		logit( "seltext found ".scalar( keys %$catKeyHash )." cat keys" );
+		# now match the .001. record to the OCLC number and write it to a flat marc file.
+		open( MARC_FLAT, ">$flatUpateFile" ) or die "Error: unable to write to '$flatUpateFile': $!\n";
+		for my $zzOneRecord ( keys %$catKeyHash )
+		{
+			print MARC_FLAT get001OverlayMARCRecord( $catKeyHash->{ $zzOneRecord }, $oclcNumberHash->{ $zzOneRecord } );;
+		}
+		close( MARC_FLAT );
+		logit( "updating catalogue records" );
+		# last;
+		# now update all the OCLC numbers first figure out if there is a 035 record in there to begin with.
+		# DON'T use this as is because it will update records that don't need to be updated. The reports we are 
+		# reading are not exceptions, they are all records. Some will be right. Some are Cancels so we need to 
+		# restrict those from file selection. We may want to go in and REPLACE the .035. records.
+		# `cat $flatUpateFile | catalogmerge -aMARC -fd -if -t035 -r -un -bc 2>err.log` if ( not -z $flatUpateFile );
+	}
+	logit( "update of .035. records complete" );
+	return 1;
+}
+
+# Takes a file of seltext output and returns another hash ref with those same 001 fields as keys
+# and matching catalogue keys as values.
+# param:  name of file for seltext to process with 'seltext -lBOTH -oA 2>/dev/null'
+# return: hash reference (new) .001.->cat key numbers.
+sub get001CatKeys
+{
+	my ( $oclcNumberFile ) = @_;
+	my $hash = {};
+	my $seltextFoundResult = `cat $oclcNumberFile | seltext -lBOTH -oA 2>/dev/null`;
+	my @foundCatalogueEntries = split( '\n', $seltextFoundResult );
+	logit( scalar( @foundCatalogueEntries )." found" );
+	foreach my $line ( @foundCatalogueEntries )
+	{
+		my @record = split( '\|', $line );
+		# records that fail look like (CaAE) a862213 {001} and only have one element in the array
+		next if ( @record == 1 );
+		# else the record looks like 568392|(CaAE) a862213 {001}|...
+		my $zzOne = substr( $record[1], 0, -5 );
+		$hash->{ $zzOne } =  $record[0];
+	}
+	return $hash;
+}
+
+# Creates a hash of the .001.->oclc numbers from an OCLC report.
+# param:  the name of the file to be read; must be a valid XRef file sent from OCLC like D120913.R468637.XREFRPT.txt.
+# return: hash reference of 001 numbers and correct OCLC numbers.
+sub getXRefRecords($)
+{
+	my $file = shift;
+	my $hash = {};
+	open( REPORT, "<$file" ) or die "Error: unable to open '$file': $!\n";
+	while (<REPORT>)
+	{
+		my $line = trim( $_ )."\n"; # Trim takes off the white space and newline.
+		# skip blank lines and lines that don't start with numbers 
+		next if ( $line !~ m/^\d/ ); # skip if the line doesn't start with a number.
+		# lets split the line on the white space swap the values so the 001 field is first.
+		my @oclc001 = split( /\s{4}/, $line );
+		chomp( $oclc001[1] );
+		$hash->{$oclc001[1]} = $oclc001[0];
+	}
+	close( REPORT );
+	return $hash;
+}
+
+# Creates a minimalist, but well formed flat MARC record of 001 and 035 fields for overlay.
+# param:  oclc record string oclc number.
+# param:  001 record string catalog 001 field.
+# return: string well formatted flat marc record.
+sub get001OverlayMARCRecord
+{
+	# Updating by cat key is more reliable but produces errors like:
+	# **Entry ID not found in format MARC: 1003
+	# because there is no entry for 1003 in the entry id config for MARC - it's a Sirsi number
+	# not related to MARC records.
+	my ( $catKey, $oclcNumber ) = @_;
+	return "" if ( not $catKey or not $oclcNumber ); # if either not fufilled then return early.
+	my $marc = "*** DOCUMENT BOUNDARY ***\n";
+	$marc .= "FORM=MARC\n";
+	$marc .= ".1003. |a$catKey\n"; 
+	$marc .= ".035.   |a(OCoLC)$oclcNumber\n";
+	return $marc;
+}
+
+# Fetch the valid Mixed reports - not Cancels and not summaries.
+# param:  
+# return: list valid reports to parse out OCLC numbers.
+# TODO:   fix so that it ftps reports from psw.oclc.org.
+sub getMixedReports
+{
+	my @fileList = ();
+	my @tmp = <D[0-9][0-9][0-9][0-9][0-9][0-9]\.R*>;
+	# my @tmp = <test.XREFRPT.txt>;
+	while ( @tmp )
+	{
+		# separate the XREFRPT files.
+		my $file = shift( @tmp );
+		# TODO get files from the report site itself with wget --user=100313990 --password=catal http://psw.oclc.org/download.aspx?setd=netbatch
+		# returns a page requesting login.
+		next if ( $file !~ m/XREFRPT/ );
+		push( @fileList, $file );
+	}
+	logit( "found ".scalar( @fileList )." reports: @fileList" );
+	return @fileList;
+}
+
 #*** DOCUMENT BOUNDARY ***
 #FORM=MARC
 #.000. |aamI 0d
