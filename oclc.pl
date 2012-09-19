@@ -452,20 +452,22 @@ sub overlayOCLCControlNumber
 	# find all the files that match the D120906.R466902.XREFRPT.txt file name.
 	my @fileList = getMixedReports();
 	my $tmpFile = qq{tmp.a};
-	logit( "found ".scalar( @fileList )." files" );
 	while ( @fileList )
 	{
-		my $file = shift( @fileList );
-		logit( "reading '$file'" );
-		my $oclcNumberHash = getXRefRecords( $file ); # hash contains 001Field->{OCLC#}.
-		# write the search strings for seltext to use.
+		my $report = shift( @fileList );
+		logit( "reading '$report'" );
+		# read in each report and fill a hash ref with our 001 field and the OCLC number equiv.
+		my $oclcNumberHash = getXRefRecords( $report );
+		# hash contains 001Field->{OCLC#}
+		# optimize seltext query: format hash keys into a file ready for pipeing into seltext
 		open( SEARCH, ">$tmpFile" ) or die "Couldn't open '$tmpFile' to write: $!\n";
 		for my $key ( keys %$oclcNumberHash )
 		{
 			print SEARCH "$key {001}\n";
 		}
 		close( SEARCH );
-		logit( "found ".scalar( keys %$oclcNumberHash )." unmatched OCLC numbers" );
+		logit( "found ".scalar( keys %$oclcNumberHash )." OCLC records" );
+		# Create hash of cat keys and OCLC numbers for dumping into a flat MARC file for editmarc.
 		my $catKeyHash = get001CatKeys( $oclcNumberHash, $tmpFile );
 		logit( "seltext found ".scalar( keys %$catKeyHash )." cat keys" );
 		# now match the .001. record to the OCLC number and write it to a flat marc file.
@@ -475,53 +477,37 @@ sub overlayOCLCControlNumber
 			print MARC_FLAT get001OverlayMARCRecord( $catKey, $oclcNumber );
 		}
 		close( MARC_FLAT );
-		logit( "updating catalogue records" );
-		last;
-		# `cat $flatUpateFile | catalogmerge -aMARC -fd -if -t035 -r -un -bc 2>err.log` if ( not -z $flatUpateFile );
+		logit( "updating ".scalar( keys %$catKeyHash )." catalogue records" );
+		`cat $flatUpateFile | catalogmerge -aMARC -fd -if -t035 -r -un -bc 2>err.log` if ( not -z $flatUpateFile );
 	}
 	logit( "update of .035. records complete" );
 	return 1;
 }
 
-# Takes a file of seltext output and returns another hash ref with those same 001 fields as keys
-# and matching catalogue keys as values.
+# Takes a file of seltext output and returns another hash ref key: 001 fields and value: catalogue keys.
+# Records not found by 001 field are ignored as are 035 records that match the value sent in the OCLC report.
 # param:  name of file for seltext to process with 'seltext -lBOTH -oA 2>/dev/null'
 # return: hash reference (new) .001.->cat key numbers.
 sub get001CatKeys
 {
 	my ( $oclc001RecordHash, $oclcNumberFile ) = @_;
 	my $hash = {};
-	my $seltextFoundResult = `cat $oclcNumberFile | seltext -lBOTH -oA | prtmarc.pl -e"035" -oCS 2>/dev/null`;
+	my $seltextFoundResult = `cat $oclcNumberFile | seltext -lBOTH | prtmarc.pl -e"001,035" -oCT 2>/dev/null`;
 	# which looks like this when successful:
-	# 950681|2011033701 {001}|1|2|0|Capilano Branch|LARGEPRINT|0|\a(OCoLC)746489732| 
-	# else when 035 wasn't found:
-	# 950681|-|
+	# 951674|sbb00213613|\a(OCoLC)751833924|
 	my @foundCatalogueEntries = split( '\n', $seltextFoundResult );
 	logit( scalar( @foundCatalogueEntries )." found" );
 	foreach my $line ( @foundCatalogueEntries )
 	{
 		my @record = split( '\|', $line );
-		# else the record looks like this when successful:
-		# 950681|2011033701 {001}|1|2|0|Capilano Branch|LARGEPRINT|0|\a(OCoLC)746489732| 
-		# else when not successful:
-		# 950681|-|
-		# get the 001
-		if ( @record > 3 )
-		{
-			my $zzOne = trim( substr( $record[1], 0, -5 ) );
-			my $oclcNumber = $oclc001RecordHash->{ $zzOne };
-			if ( not $oclcNumber )
-			{
-				print STDERR "Couldn't match '$zzOne' in hash.\n" ;
-				next;
-			}
-			# if the line doesn't have the OCLC number then we need to add it and the cat key to the hash.
-			if ( $line !~ m/($oclcNumber)/ )
-			{
-				my $catKey = $record[0];
-				$hash->{ $catKey } = $oclcNumber;
-			}
-		}
+		# 951674|sbb00213613|\a(OCoLC)751833924|
+		my ( $catKey, $zeroZeroOne, $catalogOclcNumber ) = split( '\|', $line );
+		# this is important since seltext can search with values that include leading whitespace
+		# but the leading whitespace will not match records saved to argument hash's key.
+		$zeroZeroOne = trim( $zeroZeroOne );
+		my $reportedOclcNumber = $oclc001RecordHash->{ $zeroZeroOne };
+		next if ( not $reportedOclcNumber );
+		$hash->{ $catKey } = $reportedOclcNumber if ( $reportedOclcNumber !~ m/($catalogOclcNumber)/ );
 	}
 	return $hash;
 }
