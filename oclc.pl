@@ -479,13 +479,14 @@ sub overlayOCLCControlNumber
 		close( MARC_FLAT );
 		logit( "updating ".scalar( keys %$catKeyHash )." catalogue records" );
 		`cat $flatUpateFile | catalogmerge -aMARC -fd -if -t035 -r -un -bc 2>err.log` if ( not -z $flatUpateFile );
+		unlink( $tmpFile );
 	}
 	logit( "update of .035. records complete" );
 	return 1;
 }
 
-# Takes a file of seltext output and returns another hash ref key: 001 fields and value: catalogue keys.
-# Records not found by 001 field are ignored as are 035 records that match the value sent in the OCLC report.
+# Creates a reference table of catalogue keys and their corresponding corrected OCLC numbers where required.
+# That is to say, only 035 records that need to be updated will be added to the table.
 # param:  name of file for seltext to process with 'seltext -lBOTH -oA 2>/dev/null'
 # return: hash reference (new) .001.->cat key numbers.
 sub get001CatKeys
@@ -494,25 +495,26 @@ sub get001CatKeys
 	my $hash = {};
 	my $seltextFoundResult = `cat $oclcNumberFile | seltext -lBOTH | prtmarc.pl -e"001,035" -oCT 2>/dev/null`;
 	# which looks like this when successful:
-	# 951674|sbb00213613|\a(OCoLC)751833924|
+	# 951674|sbb00213613|\a(CaAE) a1002664|\a(OCoLC)751833924|
 	my @foundCatalogueEntries = split( '\n', $seltextFoundResult );
 	logit( scalar( @foundCatalogueEntries )." found" );
 	foreach my $line ( @foundCatalogueEntries )
 	{
 		my @record = split( '\|', $line );
 		# 951674|sbb00213613|\a(OCoLC)751833924|
-		my ( $catKey, $zeroZeroOne, $catalogOclcNumber ) = split( '\|', $line );
+		my ( $catKey, $zeroZeroOne, @catalogOclcNumbers ) = split( '\|', $line );
+		my $catalogOclcNumber = join( ' ', @catalogOclcNumbers );
 		# this is important since seltext can search with values that include leading whitespace
-		# but the leading whitespace will not match records saved to argument hash's key.
+		# but the leading whitespace will not match records saved as a hash key.
 		$zeroZeroOne = trim( $zeroZeroOne );
 		my $reportedOclcNumber = $oclc001RecordHash->{ $zeroZeroOne };
 		next if ( not $reportedOclcNumber );
-		$hash->{ $catKey } = $reportedOclcNumber if ( $reportedOclcNumber !~ m/($catalogOclcNumber)/ );
+		$hash->{ $catKey } = $reportedOclcNumber if ( $catalogOclcNumber !~ m/($reportedOclcNumber)/ );
 	}
 	return $hash;
 }
 
-# Creates a hash of the .001.->oclc numbers from an OCLC report.
+# Creates a reference table of the .001. and corresponding OCLC numbers from an OCLC report.
 # param:  the name of the file to be read; must be a valid XRef file sent from OCLC like D120913.R468637.XREFRPT.txt.
 # return: hash reference of 001 numbers and correct OCLC numbers.
 sub getXRefRecords($)
@@ -616,9 +618,10 @@ sub makeMARC
 	logit( "dumping of MARC records finished" ) if ( $opt{'t'} );
 }
 
-#
-#
-#
+# Gets a well-formed flat MARC record of the argument record and date string.
+# This subroutine is used in the Cancels process.
+# param:  The record is a flex key and oclcNumber separated by a pipe: AAN-1945|(OCoLC)3329882|
+# return: flat MARC record as a string.
 sub getFlatMARC
 {
 	my ( $record, $date ) = @_;
