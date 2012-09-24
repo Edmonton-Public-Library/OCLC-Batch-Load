@@ -95,9 +95,8 @@ my $oclcDir        = "."; #qq{/s/sirsi/Unicorn/EPLwork/OCLC};
 my $passwordPath   = qq{$oclcDir/password.txt};
 my $logDir         = $oclcDir;
 my $logFile        = qq{$logDir/oclc$date.log};  # Name and location of the log file.
-my $catalogKeys    = qq{catalog_keys.lst}; # master list of catalog keys.
+my $defaultCatKeysFile = qq{catalog_keys.lst}; # master list of catalog keys.
 my $APILogfilename = qq{oclcAPI.log};
-my $defaultCatKeysFile = qq{cat_keys.lst};
 my $flatUpateFile   = qq{overlay_records.flat};
 # preset these values and getDateBounds() will redefine then as necessary.
 my $startDate = `transdate -m-1`;
@@ -123,7 +122,7 @@ To run the process manually do:
 
 usage: $0 [-acADtuwx] [-r file] [-s file] [-f files] [-z <n>] [-d"[start_date],[end_date]"] [-[lm] file]
 
- -a            : Run the API commands to generate a file of catalog keys called $catalogKeys.
+ -a            : Run the API commands to generate a file of catalog keys called $defaultCatKeysFile.
                  If -t is selected, the intermediate temporary files are not deleted.
  -A            : Do everything: run api catalog dump, split to default sized
                  files and upload the split files and labels. Same as running
@@ -278,9 +277,8 @@ sub init
 	}
 	if ( $opt{'w'} ) # clean up directory
 	{
-		unlink( $catalogKeys ) if ( -e $catalogKeys ); # master list of catalog keys.
+		unlink( $defaultCatKeysFile ) if ( -e $defaultCatKeysFile ); # master list of catalog keys.
 		unlink( $APILogfilename ) if ( -e $APILogfilename );
-		unlink( $defaultCatKeysFile ) if ( -e $defaultCatKeysFile );
 		unlink( $flatUpateFile ) if ( -e $flatUpateFile );
 		my @fileList = <*\.log>;
 		foreach my $file ( @fileList )
@@ -361,13 +359,13 @@ if ($opt{'D'})
 	}
 	logit( "total deleted titles: " . scalar ( keys( %$deletedFlexKeys ) ) );
 	#### Blow away pre-existing file (from today).
-	open( MASTER_MARC, ">$catalogKeys" ) or die "Unable to write to '$catalogKeys' to write deleted items: $!\n";
+	open( MASTER_MARC, ">$defaultCatKeysFile" ) or die "Unable to write to '$defaultCatKeysFile' to write deleted items: $!\n";
 	while ( my ( $flexKey, $oclcCode ) = each( %$deletedFlexKeys ) )
 	{
 		print MASTER_MARC "$flexKey|$oclcCode\n";
 	}
 	close( MASTER_MARC );
-	my $fileCounts = splitFile( $maxRecords, $date, $catalogKeys );
+	my $fileCounts = splitFile( $maxRecords, $date, $defaultCatKeysFile );
 	makeMARC( $fileCounts );
 	print "=== Please FTP files manually. Check -x option for more details ===\n";
 	logit( "-D finished" ) if ( $opt{'t'} );
@@ -850,7 +848,7 @@ sub selectCatKeys
 	}
 	close( DATED_CAT_KEYS );
 	# sort the uniq catalog keys numerically.
-	open( SORTED_DATED_CAT_KEYS, ">$catalogKeys" ) or die "Error opening file to write sorted, date refined CAT keys, $!\n";
+	open( SORTED_DATED_CAT_KEYS, ">$defaultCatKeysFile" ) or die "Error opening file to write sorted, date refined CAT keys, $!\n";
 	foreach my $finalKey (sort {$a <=> $b} keys(%dateRefinedKeys))
 	{
 		print SORTED_DATED_CAT_KEYS $finalKey."|\n";
@@ -862,7 +860,7 @@ sub selectCatKeys
 		unlink( $sortedItemCatKeys  );
 		unlink( $dateRefinedCatKeys );
 	}
-	logit( "catalogue key selection saved in '$catalogKeys'" );
+	logit( "catalogue key selection saved in '$defaultCatKeysFile'" );
 	logit( "-a finished" ) if ( $opt{'t'} );
 }
 
