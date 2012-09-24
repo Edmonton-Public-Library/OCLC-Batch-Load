@@ -100,7 +100,7 @@ my $APILogfilename = qq{oclcAPI.log};
 my $defaultCatKeysFile = qq{cat_keys.lst};
 my $flatUpateFile   = qq{overlay_records.flat};
 # preset these values and getDateBounds() will redefine then as necessary.
-my $startDate = `transdate -m-30`;
+my $startDate = `transdate -m-1`;
 chomp( $startDate );
 my $endDate   = `transdate -m-0`;
 chomp( $endDate );
