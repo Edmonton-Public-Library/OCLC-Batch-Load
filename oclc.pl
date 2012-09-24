@@ -18,7 +18,7 @@
 # Date:    June 4, 2012
 # Rev:     
 #          0.2 - Includes new features such as a clean up switch, and 
-#                OCLC number overlay.
+#                OCLC number update.
 #          0.1 - Beta includes deletes (CANCELS).
 #          0.0 - develop
 ########################################################################
@@ -100,9 +100,9 @@ my $APILogfilename = qq{oclcAPI.log};
 my $defaultCatKeysFile = qq{cat_keys.lst};
 my $flatUpateFile   = qq{overlay_records.flat};
 # preset these values and getDateBounds() will redefine then as necessary.
-my $startDate = `transdate -d-30`;
+my $startDate = `transdate -m-30`;
 chomp( $startDate );
-my $endDate   = `transdate -d-0`;
+my $endDate   = `transdate -m-0`;
 chomp( $endDate );
 open LOG, ">>$logFile";
 
@@ -121,20 +121,20 @@ To run the process manually do:
 3) oclc.pl -c
 4) oclc.pl -f
 
-usage: $0 [-acADtux] [-r file] [-s file] [-f files] [-z <n>] [-d"[start_date],[end_date]"] [-[lm] file]
+usage: $0 [-acADtuwx] [-r file] [-s file] [-f files] [-z <n>] [-d"[start_date],[end_date]"] [-[lm] file]
 
  -a            : Run the API commands to generate a file of catalog keys called $catalogKeys.
                  If -t is selected, the intermediate temporary files are not deleted.
  -A            : Do everything: run api catalog dump, split to default sized
                  files and upload the split files and labels. Same as running
-			     -a -f 
+                 -a -f 
  -c            : Catalog dump the cat keys found in any data files (like 120829.FILE5) 
                  in the current directory, replacing the contents with the dumped catalog records.
- -D            : Creates deleted items for OCLC upload. Like -A but for deletes. 
+ -D            : Creates deleted items for OCLC upload. Like -A but for Cancels (deletes). 
  -d [start,end]: Comma separated start and end date. Restricts search for items by create and 
                  modify dates. Defaults to one month ago as specified by 'transdate -m-1' and 
-				 today's date for an end date. Both are optional but must be valid ANSI dates or
-				 the defaults are used.
+                 today's date for an end date. Both are optional but must be valid ANSI dates or
+                 the defaults are used.
  -f            : Finds DATA and matching LABEL files in current directory, and FTPs them to OCLC.
  -lyymmdd.LAST : Create a label file for a given CANCEL or Delete file. NOTE: use the yymmdd.FILEn, or yymmdd.LAST
                  since $0 needs to count the number of records; the DATA.D MARC file has 1 line.
@@ -145,6 +145,8 @@ usage: $0 [-acADtux] [-r file] [-s file] [-f files] [-z <n>] [-d"[start_date],[e
  -r [file]     : Creates a MARC DATA.D file ready for uploading from a given flex keys file (like 120829.FILE5).
  -s [file]     : Split input into maximum number of records per DATA file(default 90000).
  -t            : Debug
+ -w            : Sweep up the current directory of OCLC litter from the last run.
+                 does not remove LABEL or DATA files. Exits after running.
  -x            : This (help) message.
  -z [int]      : Set the maximum output file size in lines, not bytes, this allows for splitting 
                  a set of catalogue keys into sets of 90000 records, which are then piped to catalogdump.
@@ -152,10 +154,11 @@ usage: $0 [-acADtux] [-r file] [-s file] [-f files] [-z <n>] [-d"[start_date],[e
 example: To just split an arbitrary text file into files of 51 lines each: $0 -z51 -s51 file.lst
          Split an arbitrary text file into files of 90000 lines each and create OCLC labels: $0 -sfile.lst -l
          To produce a cat key file for the last 30 days: $0 -a
-		 To produce a cat key file for the beginning of 2011 to now: $0 -a -d"20110101,"
-		 To produce a cat key file for the January 2012: $0 -a -d"20120101,20120201"
-		 To create marc record files from existing key files: $0 -c
-		 To FTP existing marc DATA and LABEL files to OCLC: $0 -f
+         Produce the Cancels for last month: $0 -D
+         To produce a cat key file for the beginning of 2011 to now: $0 -a -d"20110101,"
+         To produce a cat key file for the January 2012: $0 -a -d"20120101,20120201"
+         To create marc record files from existing key files: $0 -c
+         To FTP existing marc DATA and LABEL files to OCLC: $0 -f
          To do everything: $0 -A
 		 
  Version: $VERSION
@@ -247,7 +250,7 @@ sub trim($)
 # return: 
 sub init
 {
-    my $opt_string = 'AactDd:fl:m:xr:s:tUz:';
+    my $opt_string = 'AactDd:fl:m:xr:s:tUwz:';
     getopts( "$opt_string", \%opt ) or usage();
     usage() if ($opt{'x'});
 	if ( $opt{'z'} )
@@ -273,6 +276,19 @@ sub init
 		exit( 0 ) if ( not overlayOCLCControlNumber( ) );
 		exit( 1 );
 	}
+	if ( $opt{'w'} ) # clean up directory
+	{
+		unlink( $catalogKeys ) if ( -e $catalogKeys ); # master list of catalog keys.
+		unlink( $APILogfilename ) if ( -e $APILogfilename );
+		unlink( $defaultCatKeysFile ) if ( -e $defaultCatKeysFile );
+		unlink( $flatUpateFile ) if ( -e $flatUpateFile );
+		my @fileList = <*\.log>;
+		foreach my $file ( @fileList )
+		{
+			unlink( $file ) if ( -e $file );
+		}
+		exit( 1 );
+	}
 	# set dates conditionally on default or user specified dates.
 	getDateBounds();
 }
@@ -286,9 +302,9 @@ if ($opt{'A'})
 	logit( "-A started" ) if ( $opt{'t'} );
 	# select the catalog keys.
 	selectCatKeys();
-	# split the files into the desired number of records each.
 	my $date = getTimeStamp(); # get century most significant digits stripped date.
 	logit( "reading '$defaultCatKeysFile', using file size: $maxRecords" );
+	# split the files into the desired number of records each.
 	my $fileCounts = splitFile( $maxRecords, $date, $defaultCatKeysFile );
 	logit( "'$defaultCatKeysFile' split into " . keys( %$fileCounts ) . " parts" );
 	# create the catalog dump of the keys for each set.
