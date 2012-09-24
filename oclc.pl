@@ -717,7 +717,7 @@ sub getFlexKeyOCLCNumberPair
 sub getRelevantHistoryLogFiles
 {
 	# get the inclusive dates and an entire list of history files from the hist directory.
-	# find the history files that are >= the start date and <= end date and place them on a list.
+	# find the history files that are > the start date and < end date and place them on a list.
 	# if the end date is today's date then we need to add a specially named log file that looks like
 	# 20120904.hist
 	my @logs = ();
@@ -893,7 +893,7 @@ sub dumpCatalog
 # Not specifying end date defaults to today. The start date is the furthest date back in time.
 # The end date is the most recent.
 # param:  none
-# return: ">=startDate<=endDate"
+# return: ">startDate<endDate"
 #
 sub getDateBounds
 {
@@ -909,8 +909,8 @@ sub getDateBounds
 			$endDate = $dates[1];
 		}
 	}
-	logit( "date boundaries set to '>=$startDate<=$endDate'" );
-	return ">=$startDate<=$endDate";
+	logit( "date boundaries set to '>$startDate<$endDate'" );
+	return ">$startDate<$endDate";
 }
 
 #
