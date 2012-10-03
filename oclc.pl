@@ -17,6 +17,7 @@
 # Author:  Andrew Nisbet
 # Date:    June 4, 2012
 # Rev:     
+#          0.3 - ENV vars added for cron. 
 #          0.2 - Includes new features such as a clean up switch, and 
 #                OCLC number update.
 #          0.1 - Beta includes deletes (CANCELS).
@@ -30,7 +31,14 @@ use Getopt::Std;
 use File::Basename;  # Used in ftp() for local and remote file identification.
 use POSIX;           # for ceil()
 
-my $VERSION = 0.2;
+my $VERSION = 0.3;
+# Environment setup required by cron to run script because its daemon runs
+# without assuming any environment settings and we need to use sirsi's.
+###############################################
+# *** Edit these to suit your environment *** #
+$ENV{'PATH'} = ":/s/sirsi/Unicorn/Bincustom:/s/sirsi/Unicorn/Bin:/s/sirsi/Unicorn/Search/Bin:/usr/bin";
+$ENV{'UPATH'} = "/s/sirsi/Unicorn/Config/upath";
+###############################################
 ##### function must be first because logging uses it almost immediately.
 # Returns a timestamp for the log file only. The Database uses the default
 # time of writing the record for its timestamp in SQL. That was done to avoid
@@ -91,18 +99,18 @@ my $ftpDir         = qq{edx.ebsb.$edxAccount.ftp};
 ##### Client (our) side parameters
 my $maxRecords     = 16000;            # Max number records we can upload at a time, use -s to change.
 my $date           = getTimeStamp;     # current date in ascii.
-my $oclcDir        = "."; #qq{/s/sirsi/Unicorn/EPLwork/OCLC};
+my $oclcDir        = qq{/s/sirsi/Unicorn/EPLwork/cronjobscripts/OCLC};
+# my $oclcDir        = "."; # for testing
 my $passwordPath   = qq{$oclcDir/password.txt};
 my $logDir         = $oclcDir;
 my $logFile        = qq{$logDir/oclc$date.log};  # Name and location of the log file.
 my $defaultCatKeysFile = qq{catalog_keys.lst}; # master list of catalog keys.
-my $APILogfilename = qq{oclcAPI.log};
-my $flatUpateFile   = qq{overlay_records.flat};
+my $APILogfilename = qq{$oclcDir/oclcAPI.log};
+my $flatUpateFile  = qq{$oclcDir/overlay_records.flat};
 # preset these values and getDateBounds() will redefine then as necessary.
-my $startDate = `transdate -m-1`;
-chomp( $startDate );
-my $endDate   = `transdate -m-0`;
-chomp( $endDate );
+chomp( my $startDate = `transdate -m-1` );
+chomp( my $endDate   = `transdate -m-0` );
+chomp( my $tmpDir = `getpathname tmp` );
 open LOG, ">>$logFile";
 
 # Prints usage message then exits.
@@ -323,8 +331,8 @@ if ($opt{'D'})
 	my $allFlexKeysFromHistory = collectDeletedItems( @histLogs );	
 	# Now we will check for call nums that arn't in the catalog since those are are the flexkeys 
 	# for titles that no longer exist, and by definition, have been deleted.
-	my $initialFlexKeyFile       = qq{tmp_a};
-	my $flexKeysNotInCatalogFile = qq{tmp_b};
+	my $initialFlexKeyFile       = qq{$tmpDir/tmp_a};
+	my $flexKeysNotInCatalogFile = qq{$tmpDir/tmp_b};
 	open( ALL_FLEX_KEYS, ">$initialFlexKeyFile" ) or die "Unable to write to '$initialFlexKeyFile': $!\n";
 	while ( my ( $key, $value ) = each( %$allFlexKeysFromHistory ) )
 	{
@@ -390,14 +398,14 @@ if ( $opt{'a'} )
 if ( $opt{'c'} )
 {
 	logit( "-c started" ) if ( $opt{'t'} );
-	my @fileList = <[0-9][0-9][0-9][0-9][0-9][0-9]\.*>;
+	my @fileList = <$oclcDir/[0-9][0-9][0-9][0-9][0-9][0-9]\.*>;
 	if ( not @fileList )
 	{
 		logit( "no data files to catalogdump. Did you forget to create list(s) with -a and -s?" );
 		exit( 0 );
 	}
 	my $fileCountHashRef;
-	foreach my $file (@fileList)
+	foreach my $file ( @fileList )
 	{
 		# open file and find the number of records.
 		open( KEY_FILE, "<$file" ) or die "Error opening '$file': $!\n";
@@ -465,7 +473,7 @@ sub overlayOCLCControlNumber
 {
 	# find all the files that match the D120906.R466902.XREFRPT.txt file name.
 	my @fileList = getMixedReports();
-	my $tmpFile = qq{tmp.a};
+	my $tmpFile = qq{$tmpDir/tmp_a};
 	while ( @fileList )
 	{
 		my $report = shift( @fileList );
@@ -576,7 +584,7 @@ sub get001OverlayMARCRecord
 sub getMixedReports
 {
 	my @fileList = ();
-	my @tmp = <D[0-9][0-9][0-9][0-9][0-9][0-9]\.R*>;
+	my @tmp = <$oclcDir/D[0-9][0-9][0-9][0-9][0-9][0-9]\.R*>;
 	# my @tmp = <test.XREFRPT.txt>;
 	while ( @tmp )
 	{
@@ -604,16 +612,16 @@ sub getMixedReports
 # side effect: creates MARC file and LABEL.
 sub makeMARC
 {
-	my $fileCountHashRef = $_[0];
+	my $fileCountHashRef = shift;
 	logit( "dumping MARC records" ) if ( $opt{'t'} );
-	while( my ($fileName, $numRecords) = each %$fileCountHashRef )
+	while( my ($fName, $numRecords) = each %$fileCountHashRef )
 	{
 		# open and read the keys in the file
-		
-		my $outputFileName = qq{DATA.D$fileName};
+		my ($fileName, $directory, $suffix) = fileparse($fName);
+		my $outputFileName = qq{$oclcDir/DATA.D$fileName};
 		my $outputFileFlat = "$outputFileName.flat";
 		logit( "dumping keys found in '$fileName' to '$outputFileFlat'" );
-		open( SPLIT_FILE, "<$fileName" ) or die "unable to open split file '$fileName': $!\n";
+		open( SPLIT_FILE, "<$fName" ) or die "unable to open split file '$fName': $!\n";
 		open( MARC_FILE, ">$outputFileFlat" ) or die "unable to write to '$outputFileFlat': $!\n";
 		while (<SPLIT_FILE>)
 		{
@@ -627,7 +635,7 @@ sub makeMARC
 		logit( "converted '$outputFileFlat' to MARC" );
 		# create a label for the file.
 		unlink( $outputFileFlat );
-		createOCLCLableFiles( $fileName, $numRecords, $projectIdCancel );
+		createOCLCLableFiles( qq{$oclcDir/$fileName}, $numRecords, $projectIdCancel );
 	}
 	logit( "dumping of MARC records finished" ) if ( $opt{'t'} );
 }
@@ -720,34 +728,29 @@ sub getRelevantHistoryLogFiles
 	# find the history files that are > the start date and < end date and place them on a list.
 	# if the end date is today's date then we need to add a specially named log file that looks like
 	# 20120904.hist
-	my @logs = ();
-	my $today       = `transdate -d-0`;
-	chomp( $today );
+	my @files = ();
+	return $opt{'f'} if ( $opt{'f'} );
+	chomp( my $histDirectory = `getpathname hist` );
 	# Start will be the first 6 chars of an ANSI date: 20120805 and 20120904
 	my $startFileName = substr( $startDate, 0, 6 );
 	my $endFileName   = substr( $endDate,   0, 6 );
-	my $path = `getpathname hist`;
-	chomp( $path );
-	my @fileList = <$path/*.Z>;
-	my ($fileName, $directory, $suffix);
+	my @fileList = <$histDirectory/[0-9][0-9][0-9][0-9][0-9][0-9]\.hist*>;
+	my ( $fileName, $directory, $suffix );
 	foreach my $file ( @fileList )
 	{
-		($fileName, $directory, $suffix) = fileparse( $file );
+		( $fileName, $directory, $suffix ) = fileparse( $file );
 		my $nameDate = substr( $fileName, 0, 6 );
-		if ( scalar( $nameDate ) >= scalar( $startFileName ) and scalar( $nameDate ) <= scalar( $endFileName ))
-		{
-			push( @logs, $file );
-		}
+		push( @files, $file ) if ( scalar( $nameDate ) >= scalar( $startFileName ) and scalar( $nameDate ) <= scalar( $endFileName ));
 	}
 	# for today's log file we have to compose the file name
+	chomp( my $today = `transdate -d-0` );
 	if ( $endDate eq $today )
 	{
 		# append today's log which looks like 20120904.hist
-		print " $endDate matches today's date.\n" if ( $opt{'t'} );
-		push ( @logs, "$directory$date.hist" );
+		push ( @files, "$histDirectory/$today.hist" );
 	}
-	logit( "found the following logs that match date criteria: @logs" );
-	return @logs;
+	logit( "found the following logs that match date criteria: @files" );
+	return @files;
 }
 
 #
@@ -760,8 +763,8 @@ sub selectFTPList
 	logit( "selectFTPList started" ) if ( $opt{'t'} );
 	my @ftpList;
 	logit( "generating eligible list of marc DATA and LABEL files" );
-	my @dataList = <DATA.D*>;
-	my @labelList= <LABEL.D*>;
+	my @dataList = <$oclcDir/DATA.D*>;
+	my @labelList= <$oclcDir/LABEL.D*>;
 	# rough test that there are the same number of DATA files as LABEL files,
 	# if there are not, there may files left in the directory from earlier in the day.
 	if ( scalar( @dataList ) != scalar( @labelList ) )
@@ -802,9 +805,9 @@ sub selectFTPList
 sub selectCatKeys
 {
 	logit( "-a started" ) if ( $opt{'t'} );
-	my $initialItemCatKeys = qq{tmp_a};
-	my $sortedItemCatKeys  = qq{tmp_b};
-	my $dateRefinedCatKeys = qq{tmp_c};
+	my $initialItemCatKeys = qq{$tmpDir/tmp_a};
+	my $sortedItemCatKeys  = qq{$tmpDir/tmp_b};
+	my $dateRefinedCatKeys = qq{$tmpDir/tmp_c};
 	print "-a selected -run API.\n" if ($opt{'t'});
 	my $unicornItemTypes = "PAPERBACK,JPAPERBACK,BKCLUBKIT,COMIC,DAISYRD,EQUIPMENT,E-RESOURCE,FLICKSTOGO,FLICKTUNE,JFLICKTUNE,JTUNESTOGO,PAMPHLET,RFIDSCANNR,TUNESTOGO,JFLICKTOGO,PROGRAMKIT,LAPTOP,BESTSELLER,JBESTSELLR";
 	logit( "exclude item types: $unicornItemTypes" );
@@ -878,8 +881,10 @@ sub dumpCatalog
 	while( my ($fileName, $numRecords) = each %$fileCountHashRef )
 	{
 		# open and read the keys in the file
-		logit( "dumping catalogue keys found in '$fileName' to 'DATA.D$fileName'" );
-        `cat $fileName | catalogdump -om > DATA.D$fileName 2>>$APILogfilename`;
+		
+		my ($fName, $directory, $suffix) = fileparse( $fileName );
+		logit( "dumping catalogue keys found in '$fileName' to 'DATA.D$fName'" );
+        `cat $fileName | catalogdump -om > $directory/DATA.D$fName 2>>$APILogfilename`;
 		# create a label for the file.
 		createOCLCLableFiles( $fileName, $numRecords, $projectIdMixed );
 	}
@@ -1064,8 +1069,7 @@ sub createStandAloneLabelFile
 		$lineCount++;
 	}
 	close( DATA );
-	my ($fileName, $directory, $suffix) = fileparse( $file );
-	createOCLCLableFiles( $fileName, $lineCount, $projectType );
+	createOCLCLableFiles( $file, $lineCount, $projectType );
 }
 
 # Creates the label file to specifications:
@@ -1086,7 +1090,7 @@ sub createStandAloneLabelFile
 # ORS  CNEDM
 # FDI  P012569
 #
-# param:  dataFileName string - like 120829.FILE1
+# param:  dataFileName string - like /s/sirsi/Unicorn/120829.FILE1
 # param:  recordCount integer - number of records in the file
 # return: 
 # side effect: creates a label file named LABEL.D<dataFileName>
