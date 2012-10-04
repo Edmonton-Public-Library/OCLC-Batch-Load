@@ -765,6 +765,8 @@ sub selectFTPList
 	logit( "generating eligible list of marc DATA and LABEL files" );
 	my @dataList = <$oclcDir/DATA.D*>;
 	my @labelList= <$oclcDir/LABEL.D*>;
+	logit( "dataList  contains: '@dataList'" ) if ( $opt{'t'} );
+	logit( "labelList contains: '@labelList'" ) if ( $opt{'t'} );
 	# rough test that there are the same number of DATA files as LABEL files,
 	# if there are not, there may files left in the directory from earlier in the day.
 	if ( scalar( @dataList ) != scalar( @labelList ) )
@@ -775,11 +777,14 @@ sub selectFTPList
 	# match up the data and label files.
 	foreach my $dataFile ( @dataList )
 	{
-		my $thisDataName = substr( $dataFile, 4 );
+		# compare names so the files are pushed onto the list in order, each DATA with its LABEL.
+		my ( $thisDataName, $directory, $suffix ) = fileparse( $dataFile );
+		my $dataName = substr( $thisDataName, 4 );
 		foreach my $labelFile ( @labelList )
 		{
-			my $thisLabelName = substr( $labelFile, 5 );
-			if ( $thisDataName eq $thisLabelName )
+			my ( $thisLabelName, $directory, $suffix ) = fileparse( $labelFile );
+			my $labelName = substr( $thisLabelName, 5 );
+			if ( $dataName eq $labelName )
 			{
 				push( @ftpList, $dataFile );
 				push( @ftpList, $labelFile );
@@ -787,6 +792,7 @@ sub selectFTPList
 			}
 		}
 	}
+	logit( "ftpList contains: '@ftpList'" );
 	if ( scalar( @dataList ) * 2 != scalar( @ftpList ) )
 	{
 		logit( "Error: mismatch of DATA and LABEL files" );
