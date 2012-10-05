@@ -95,18 +95,20 @@ sub getTimeStamp
 my $edxAccount         = qq{cnedm};
 my $projectIdMixed     = qq{P012569};
 my $projectIdCancel    = qq{P012570};
-my $userName           = "t".$edxAccount."1";      # User name.
+my $userName           = "t".$edxAccount."1";      # User name for FTP
 my $ftpUrl             = qq{edx.oclc.org};
 my $ftpDir             = qq{edx.ebsb.$edxAccount.ftp};
 ##### Client (our) side parameters
 my $maxRecords         = 16000;            # Max number records we can upload at a time, use -s to change.
 my $date               = getTimeStamp;     # current date in ascii.
-chomp( my $oclcDir     = getcwd() );
+############### change to your favourite since cron needs to know where to put all the results.
+my $oclcDir            = qq{/s/sirsi/Unicorn/EPLwork/cronjobscripts/OCLC};
 my $passwordPath       = qq{$oclcDir/password.txt};
 my $logDir             = $oclcDir;
 my $logFile            = qq{$logDir/oclc$date.log};  # Name and location of the log file.
 my $defaultCatKeysFile = qq{$oclcDir/catalog_keys.lst}; # master list of catalog keys.
 my $APILogfilename     = qq{$oclcDir/oclcAPI.log};
+my $FTPLogfilename     = qq{$logDir/ftp.log};
 my $flatUpateFile      = qq{$oclcDir/overlay_records.flat};
 # preset these values and getDateBounds() will redefine then as necessary.
 chomp( my $startDate   = `transdate -m-1` );
@@ -234,15 +236,16 @@ sub resetPassword
 	print "oldPassword = '$oldPassword'\n";
 	my $newPassword = getPassword( 1 );
 	print "newPassword = '$newPassword'\n";
-	return;
-	open( FTP, "| ftp -n $ftpUrl >ftp.log" ) or die "Error failed to open stream to $ftpUrl: $!\n";
-	logit( "stream opened." );
-	print FTP "quote USER sirsi\n";
-	print FTP "quote PASS 3dmontou/3dmontov/3dmontov\n";
-	print FTP "bye\n";
-	print close( FTP )."\n";
-	print ">>>$?\n";
-	logit( "connection closed" );
+	# return;
+	# open( FTP, "| ftp -n $ftpUrl >$FTPLogfilename" ) or die "Error failed to open stream to $ftpUrl: $!\n";
+	# logit( "stream opened." );
+	# print FTP "quote USER $userName\n";
+	# print FTP "quote PASS oldPassword/3dmontov/3dmontov\n";
+	# print FTP "quote PASS $oldPassword/$newPassword/$newPassword\n";
+	# print FTP "bye\n";
+	# print close( FTP )."\n";
+	# print ">>>$?\n";
+	# logit( "connection closed" );
 }
 
 #
@@ -957,7 +960,7 @@ sub getDateBounds
 sub ftp
 {
 	my ($host, $directory, $userName, $password, @fileList) = @_;
-	open( FTP, "| ftp -n $host\n" ) or die "Error failed to open stream to $host: $!\n";
+	open( FTP, "| ftp -n $host\n >$FTPLogfilename" ) or die "Error failed to open stream to $host: $!\n";
 	logit( "stream opened." );
 	print FTP "quote USER $userName\n";
 	logit( "passed user name" );
@@ -972,8 +975,13 @@ sub ftp
 	logit( "set pri and sec for oversized files" );
 	print FTP "cd '$directory'\n";
 	logit( "cd'd to '$directory'" );
-	foreach my $file ( @fileList )
+	my ( $file, $localDirectory, $suffix ) = fileparse( $fileList[0] );
+	# don't use quotes for local directory.
+	print FTP "lcd $localDirectory\n";
+	logit( "lcd'd to $localDirectory" );
+	foreach my $fileOnList ( @fileList )
 	{
+		( $file, $localDirectory, $suffix ) = fileparse( $fileOnList );
 		logit( "putting $file" );
 		print FTP "put $file\n";
 	}
@@ -1011,11 +1019,11 @@ sub splitFile
 	# precompose the split file names
 	for ( my $i = 1; $i < $fileCount; $i++ ) 
 	{
-		push( @fileNames, qq{$baseName.FILE$i} ); # [120623.FILE1 ...] 120623.LAST, for generic files
+		push( @fileNames, qq{$oclcDir/$baseName.FILE$i} ); # [120623.FILE1 ...] 120623.LAST, for generic files
 		# -c will prepend the correct 'DATA.D' when dumping the catalog records.
 	}
 	# the last file is always called *.LAST even if there is only one file.
-	push( @fileNames, qq{$baseName.LAST} );
+	push( @fileNames, qq{$oclcDir/$baseName.LAST} );
 	# open the input file and prepare read the contents into each file fragment.
 	open(INPUT, "<$fileInput") or die "Error opening file to split: $!\n";
 	while(<INPUT>)
@@ -1126,7 +1134,7 @@ sub createOCLCLableFiles
 {
 	my ( $dataFileName, $numRecords, $projectId ) = @_;
 	my ($fileName, $directory, $suffix) = fileparse($dataFileName);
-	my $labelFileName = $directory.qq{LABEL.D}.$fileName;
+	my $labelFileName = qq{$oclcDir/LABEL.D}.$fileName;
 	open( LABEL, ">$labelFileName" ) or die "error couldn't create label file '$labelFileName': $!\n";
 	print LABEL "DAT  ".getTimeStamp(0)."000000.0\n"; # 14.1 - '0' right fill.
 	print LABEL "RBF  $numRecords\n"; # like: 88947
