@@ -17,6 +17,7 @@
 # Author:  Andrew Nisbet
 # Date:    June 4, 2012
 # Rev:     
+#          0.4 - Code modified to account for absolute pathing of files and -r changed to -M. 
 #          0.3 - ENV vars added for cron. 
 #          0.2 - Includes new features such as a clean up switch, and 
 #                OCLC number update.
@@ -31,7 +32,8 @@ use Getopt::Std;
 use File::Basename;  # Used in ftp() for local and remote file identification.
 use POSIX;           # for ceil()
 
-my $VERSION = 0.3;
+
+my $VERSION = 0.4;
 # Environment setup required by cron to run script because its daemon runs
 # without assuming any environment settings and we need to use sirsi's.
 ###############################################
@@ -90,27 +92,26 @@ sub getTimeStamp
 	}
 }
 ##### Server (OCLC) side parameters
-my $edxAccount     = qq{cnedm};
-my $projectIdMixed = qq{P012569};
-my $projectIdCancel= qq{P012570};
-my $userName       = "t".$edxAccount."1";      # User name.
-my $ftpUrl         = qq{edx.oclc.org};
-my $ftpDir         = qq{edx.ebsb.$edxAccount.ftp};
+my $edxAccount         = qq{cnedm};
+my $projectIdMixed     = qq{P012569};
+my $projectIdCancel    = qq{P012570};
+my $userName           = "t".$edxAccount."1";      # User name.
+my $ftpUrl             = qq{edx.oclc.org};
+my $ftpDir             = qq{edx.ebsb.$edxAccount.ftp};
 ##### Client (our) side parameters
-my $maxRecords     = 16000;            # Max number records we can upload at a time, use -s to change.
-my $date           = getTimeStamp;     # current date in ascii.
-my $oclcDir        = qq{/s/sirsi/Unicorn/EPLwork/cronjobscripts/OCLC};
-# my $oclcDir        = "."; # for testing
-my $passwordPath   = qq{$oclcDir/password.txt};
-my $logDir         = $oclcDir;
-my $logFile        = qq{$logDir/oclc$date.log};  # Name and location of the log file.
-my $defaultCatKeysFile = qq{catalog_keys.lst}; # master list of catalog keys.
-my $APILogfilename = qq{$oclcDir/oclcAPI.log};
-my $flatUpateFile  = qq{$oclcDir/overlay_records.flat};
+my $maxRecords         = 16000;            # Max number records we can upload at a time, use -s to change.
+my $date               = getTimeStamp;     # current date in ascii.
+chomp( my $oclcDir     = getcwd() );
+my $passwordPath       = qq{$oclcDir/password.txt};
+my $logDir             = $oclcDir;
+my $logFile            = qq{$logDir/oclc$date.log};  # Name and location of the log file.
+my $defaultCatKeysFile = qq{$oclcDir/catalog_keys.lst}; # master list of catalog keys.
+my $APILogfilename     = qq{$oclcDir/oclcAPI.log};
+my $flatUpateFile      = qq{$oclcDir/overlay_records.flat};
 # preset these values and getDateBounds() will redefine then as necessary.
-chomp( my $startDate = `transdate -m-1` );
-chomp( my $endDate   = `transdate -m-0` );
-chomp( my $tmpDir = `getpathname tmp` );
+chomp( my $startDate   = `transdate -m-1` );
+chomp( my $endDate     = `transdate -m-0` );
+chomp( my $tmpDir      = `getpathname tmp` );
 open LOG, ">>$logFile";
 
 # Prints usage message then exits.
@@ -128,7 +129,7 @@ To run the process manually do:
 3) oclc.pl -c
 4) oclc.pl -f
 
-usage: $0 [-acADtuwx] [-r file] [-s file] [-f files] [-z <n>] [-d"[start_date],[end_date]"] [-[lm] file]
+usage: $0 [-acADrtuwx] [-M file] [-s file] [-f files] [-z <n>] [-d"[start_date],[end_date]"] [-[lm] file]
 
  -a            : Run the API commands to generate a file of catalog keys called $defaultCatKeysFile.
                  If -t is selected, the intermediate temporary files are not deleted.
@@ -149,7 +150,8 @@ usage: $0 [-acADtuwx] [-r file] [-s file] [-f files] [-z <n>] [-d"[start_date],[
                  or yymmdd.LAST since $0 needs to count the number of records; the DATA.D MARC file has 1 line.
  -U            : Updates bibrecords with missing OCLC numbers extracted from OCLC CrossRef Reports 
                  (like D120913.R468704.XREFRPT.txt).
- -r [file]     : Creates a MARC DATA.D file ready for uploading from a given flex keys file (like 120829.FILE5).
+ -M [file]     : Creates a MARC DATA.D file ready for uploading from a given flex keys file (like 120829.FILE5).
+ -r            : Reset OCLC password.
  -s [file]     : Split input into maximum number of records per DATA file(default 90000).
  -t            : Debug
  -w            : Sweep up the current directory of OCLC litter from the last run.
@@ -179,29 +181,31 @@ EOF
 # new line character) are considered part of the password. Any other lines in the 
 # file are ignored and will be deleted if the isNewPasswordRequest paramater is passed.
 #
-# param:  path string - location of the password file.
 # param:  isNewPasswordRequest anyType - pass in a 1 if you want a new password generated
 #         The old password is read from file, a new password is generated, the old password
 #         file is deleted and the new password is written to the file specified by param: path. 
 # return: password string.
-sub getPassword
+sub getPassword( $ )
 {
-	my $path = shift;
 	my $isNewPasswordRequest = shift;
 	my $oldPassword;
 	my $newPassword;
-	open( PASSWORD, "<$path" ) or die "error: getPassword($path) failed: $!\n";
+	open( PASSWORD, "<$passwordPath" ) or die "error failed to read '$passwordPath' $!\n";
 	my @lines = <PASSWORD>;
 	close( PASSWORD );
 	die "error: password file must contain the password as the first line.\n" if (! @lines or $lines[0] eq "");
 	$oldPassword = $lines[0];
 	chomp( $oldPassword );
-	if ( defined( $isNewPasswordRequest ) )
+	if ( $isNewPasswordRequest )
 	{
 		my @passwdChars = split('', $oldPassword);
 		++$passwdChars[$#passwdChars];
 		$newPassword = join('',@passwdChars);
-		open(PASSWORD, ">$path") or print "error: getPassword($path) failed: $!, the new password is $newPassword\n";
+		# now perl helpfully changes ++{z} to {aa}, great but makes password too long for OCLC so 
+		# now we will shorten it by removing the second character. WARNING if the second character
+		# of your password is your one-and-only required digit, your password will fail.
+		$newPassword = join( '',@passwdChars[0,2..$#passwdChars] ) if ( length( $newPassword ) > 8 );
+		open(PASSWORD, ">$passwordPath") or print "error failed to write '$passwordPath' $!, the new password is $newPassword\n";
 		print PASSWORD "$newPassword\n";
 		close(PASSWORD);
 		return $newPassword;
@@ -223,9 +227,22 @@ sub getPassword
 # ftp> quit
 # 221 Quit command received. Goodbye.
 # bash-3.00$
+# You only get 5 chances then your account is barred and you have to phone 1-800-
 sub resetPassword
 {
-	
+	my $oldPassword = getPassword( 0 );
+	print "oldPassword = '$oldPassword'\n";
+	my $newPassword = getPassword( 1 );
+	print "newPassword = '$newPassword'\n";
+	return;
+	open( FTP, "| ftp -n $ftpUrl >ftp.log" ) or die "Error failed to open stream to $ftpUrl: $!\n";
+	logit( "stream opened." );
+	print FTP "quote USER sirsi\n";
+	print FTP "quote PASS 3dmontou/3dmontov/3dmontov\n";
+	print FTP "bye\n";
+	print close( FTP )."\n";
+	print ">>>$?\n";
+	logit( "connection closed" );
 }
 
 #
@@ -257,7 +274,7 @@ sub trim($)
 # return: 
 sub init
 {
-    my $opt_string = 'AactDd:fl:m:xr:s:tUwz:';
+    my $opt_string = 'AactDd:fl:M:m:xrs:tUwz:';
     getopts( "$opt_string", \%opt ) or usage();
     usage() if ($opt{'x'});
 	if ( $opt{'z'} )
@@ -273,9 +290,14 @@ sub init
 	{
 		createStandAloneLabelFile( $opt{'m'}, $projectIdMixed );
 	}
-	if ( $opt{'r'} )# create a MARC file and LABEL file for uploading from a [date].LAST file.
+	if ( $opt{'r'} )# expects <yymmdd>.FILEn for mixed project id.
 	{
-		createStandAloneMARCFile( $opt{'r'} );
+		exit( 0 ) if ( not resetPassword( $projectIdMixed ) );
+		exit( 1 );
+	}
+	if ( $opt{'M'} )# create a MARC file and LABEL file for uploading from a [date].LAST file.
+	{
+		createStandAloneMARCFile( $opt{'M'} );
 		exit( 1 );
 	}
 	if ( $opt{'U'} )# create a MARC file and LABEL file for uploading from a [date].LAST file.
@@ -302,7 +324,6 @@ init();
 
 # If the user specified a specific file to split. It will split
 # ANY text file into 90000 line files.
-######## TODO test -A ########
 if ($opt{'A'})
 {
 	logit( "-A started" ) if ( $opt{'t'} );
@@ -445,7 +466,7 @@ if ( $opt{'f'} )
 {
 	logit( "-f started" ) if ( $opt{'t'} );
 	my @fileList = selectFTPList();
-	my $password = getPassword( $passwordPath );
+	my $password = getPassword( 0 );
 	logit( "password read from '$passwordPath'" );
 	logit( "ftp successful" ) if ( ftp( $ftpUrl, $ftpDir, $userName, $password, @fileList ) );
 	# Test ftp site.
