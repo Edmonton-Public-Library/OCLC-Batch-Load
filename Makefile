@@ -4,7 +4,7 @@ USER=sirsi
 # this is the test directory. Production is in cronjobscripts.
 # this allows us to move test scripts to the server without
 # affecting the existing production code.
-REMOTE=~/Unicorn/EPLwork/anisbet/OCLC/
+REMOTE=~/Unicorn/EPLwork/anisbet/
 LOCAL=~/projects/oclc/
 APP=oclc.pl
 FTP=ftp.pl

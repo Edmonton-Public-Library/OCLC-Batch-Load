@@ -17,6 +17,7 @@
 # Author:  Andrew Nisbet
 # Date:    June 4, 2012
 # Rev:     
+#          0.5 - '-w' also cleans up last months submission. 
 #          0.4 - Code modified to account for absolute pathing of files and -r changed to -M. 
 #          0.3 - ENV vars added for cron. 
 #          0.2 - Includes new features such as a clean up switch, and 
@@ -33,7 +34,7 @@ use File::Basename;  # Used in ftp() for local and remote file identification.
 use POSIX;           # for ceil()
 
 
-my $VERSION = 0.4;
+my $VERSION = 0.5;
 # Environment setup required by cron to run script because its daemon runs
 # without assuming any environment settings and we need to use sirsi's.
 ###############################################
@@ -157,7 +158,7 @@ usage: $0 [-acADrtuwx] [-M file] [-s file] [-f files] [-z <n>] [-d"[start_date],
  -s [file]     : Split input into maximum number of records per DATA file(default 90000).
  -t            : Debug
  -w            : Sweep up the current directory of OCLC litter from the last run.
-                 does not remove LABEL or DATA files. Exits after running.
+                 Removes LABEL, DATA, log and 123456.LAST files. Exits after running.
  -x            : This (help) message.
  -z [int]      : Set the maximum output file size in lines, not bytes, this allows for splitting 
                  a set of catalogue keys into sets of 90000 records, which are then piped to catalogdump.
@@ -314,6 +315,21 @@ sub init
 		unlink( $APILogfilename ) if ( -e $APILogfilename );
 		unlink( $flatUpateFile ) if ( -e $flatUpateFile );
 		my @fileList = <*\.log>;
+		foreach my $file ( @fileList )
+		{
+			unlink( $file ) if ( -e $file );
+		}
+		@fileList = <DATA\.D[0-9][0-9][0-9][0-9][0-9][0-9]\.*>;
+		foreach my $file ( @fileList )
+		{
+			unlink( $file ) if ( -e $file );
+		}
+		@fileList = <LABEL\.D[0-9][0-9][0-9][0-9][0-9][0-9]\.*>;
+		foreach my $file ( @fileList )
+		{
+			unlink( $file ) if ( -e $file );
+		}
+		@fileList = <[0-9][0-9][0-9][0-9][0-9][0-9]\.*>;
 		foreach my $file ( @fileList )
 		{
 			unlink( $file ) if ( -e $file );
