@@ -3,6 +3,25 @@
 # Purpose: Upload bibliographic records from EPL to OCLC.
 # Method:  EPL's catalog MARC records are uploaded monthly to OCLC for 
 #          the purposes of searching and other InterLibrary Loans (ILL).
+# Upload bibliographic records from EPL to OCLC.
+#    Copyright (C) 2013, 2014  Andrew Nisbet
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
+# MA 02110-1301, USA.
+#
+# Author:  Andrew Nisbet, Edmonton Public Library
 #
 # Steps (each explained later) for uploading Adds and Changes (MIXED) project:
 # 1) oclc.pl -a [-d"start,end"]
@@ -233,10 +252,10 @@ sub getPassword( $ )
 # You only get 5 chances then your account is barred and you have to phone 1-800-
 sub resetPassword
 {
-	my $oldPassword = getPassword( 0 );
-	print "oldPassword = '$oldPassword'\n";
-	my $newPassword = getPassword( 1 );
-	print "newPassword = '$newPassword'\n";
+	# my $oldPassword = getPassword( 0 );
+	# print "oldPassword = '$oldPassword'\n";
+	# my $newPassword = getPassword( 1 );
+	# print "newPassword = '$newPassword'\n";
 	# return;
 	# open( FTP, "| ftp -n $ftpUrl >$FTPLogfilename" ) or die "Error failed to open stream to $ftpUrl: $!\n";
 	# logit( "stream opened." );
@@ -630,7 +649,7 @@ sub getMixedReports
 	{
 		# separate the XREFRPT files.
 		my $file = shift( @tmp );
-		# TODO get files from the report site itself with wget --user=100313990 --password=catal http://psw.oclc.org/download.aspx?setd=netbatch
+		# TODO get files from the report site itself with wget --user=100313990 --password=some_password http://psw.oclc.org/download.aspx?setd=netbatch
 		# returns a page requesting login.
 		next if ( $file !~ m/XREFRPT/ );
 		push( @fileList, $file );
