@@ -36,6 +36,7 @@
 # Author:  Andrew Nisbet
 # Date:    June 4, 2012
 # Rev:     
+#          0.6 - Updated comments, removed trailing module '1' EOF marker. 
 #          0.5 - '-w' also cleans up last months submission. 
 #          0.4 - Code modified to account for absolute pathing of files and -r changed to -M. 
 #          0.3 - ENV vars added for cron. 
@@ -53,7 +54,7 @@ use File::Basename;  # Used in ftp() for local and remote file identification.
 use POSIX;           # for ceil()
 
 
-my $VERSION = 0.5;
+my $VERSION = 0.6;
 # Environment setup required by cron to run script because its daemon runs
 # without assuming any environment settings and we need to use sirsi's.
 ###############################################
@@ -513,7 +514,6 @@ if ( $opt{'f'} )
 }
 
 close(LOG);
-1; # exit with successful status.
 
 # ======================== Functions =========================
 
