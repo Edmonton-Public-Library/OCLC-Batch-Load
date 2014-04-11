@@ -2,3 +2,5 @@ oclc_testing.xlsx
 README
 ftp.pl
 /home/ilsdev/projects/oclc/javaftp/build/classes/epl/ftp/PasswordFileReader.class
+ftp/
+javaftp/password.txt
