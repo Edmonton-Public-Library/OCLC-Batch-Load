@@ -36,6 +36,8 @@
 # Author:  Andrew Nisbet
 # Date:    June 4, 2012
 # Rev:     
+#          0.7 - Added 'TODAY' as keyword for selection dates. Added -kf035 for catalogdump
+#                Added -p to specify a project number other than the default values. 
 #          0.6 - Updated comments, removed trailing module '1' EOF marker. 
 #          0.5 - '-w' also cleans up last months submission. 
 #          0.4 - Code modified to account for absolute pathing of files and -r changed to -M. 
@@ -54,7 +56,7 @@ use File::Basename;  # Used in ftp() for local and remote file identification.
 use POSIX;           # for ceil()
 
 
-my $VERSION = 0.6;
+my $VERSION = 0.7;
 # Environment setup required by cron to run script because its daemon runs
 # without assuming any environment settings and we need to use sirsi's.
 ###############################################
@@ -157,23 +159,29 @@ usage: $0 [-acADrtuwx] [-M file] [-s file] [-f files] [-z <n>] [-d"[start_date],
  -a            : Run the API commands to generate a file of catalog keys called $defaultCatKeysFile.
                  If -t is selected, the intermediate temporary files are not deleted.
  -A            : Do everything: run api catalog dump, split to default sized
-                 files and upload the split files and labels. Same as running
-                 -a -f 
+                 files, but does not upload via FTP.
  -c            : Catalog dump the cat keys found in any data files (like 120829.FILE5) 
                  in the current directory, replacing the contents with the dumped catalog records.
  -D            : Creates deleted items for OCLC upload. Like -A but for Cancels (deletes). 
  -d [start,end]: Comma separated start and end date. Restricts search for items by create and 
                  modify dates. Defaults to one month ago as specified by 'transdate -m-1' and 
-                 today's date for an end date. Both are optional but must be valid ANSI dates or
-                 the defaults are used.
+                 'transdate -m-0' or the start of the current month. Both are optional, and may also
+                 include the Unicorn 'TODAY' key word. Do not use modifiers like \< or \> or \=. 
+				 Anything greater than the first value will be used. Anything less than the second
+                 value will be used. The default value for start and end dates are used if one or 
+                 the other is missing. Example: ",20140901" means dump catalog items after the first of
+				 last month, up until the day before 20140901. "20120101,", means consider records
+                 after 20120101 up until the beginning of this month. "20120101,20140901" means
+                 consider records from 20120101, upto 20140831.
  -f            : Finds DATA and matching LABEL files in current directory, and FTPs them to OCLC.
  -lyymmdd.LAST : Create a label file for a given CANCEL or Delete file. NOTE: use the yymmdd.FILEn, or yymmdd.LAST
                  since $0 needs to count the number of records; the DATA.D MARC file has 1 line.
  -myymmdd.LAST : Create a label file for a given MIXED or adds/changes project file. NOTE: use the yymmdd.FILEn,
                  or yymmdd.LAST since $0 needs to count the number of records; the DATA.D MARC file has 1 line.
+ -M [file]     : Creates a MARC DATA.D file ready for uploading from a given flex keys file (like 120829.FILE5).
+ -p [project]  : Use this project number instead of the default values set within the script.
  -U            : Updates bibrecords with missing OCLC numbers extracted from OCLC CrossRef Reports 
                  (like D120913.R468704.XREFRPT.txt).
- -M [file]     : Creates a MARC DATA.D file ready for uploading from a given flex keys file (like 120829.FILE5).
  -r            : Reset OCLC password.
  -s [file]     : Split input into maximum number of records per DATA file(default 90000).
  -t            : Debug
@@ -298,7 +306,7 @@ sub trim($)
 # return: 
 sub init
 {
-    my $opt_string = 'AactDd:fl:M:m:xrs:tUwz:';
+    my $opt_string = 'AactDd:fl:M:m:p:xrs:tUwz:';
     getopts( "$opt_string", \%opt ) or usage();
     usage() if ($opt{'x'});
 	if ( $opt{'z'} )
@@ -949,7 +957,7 @@ sub dumpCatalog
 		
 		my ($fName, $directory, $suffix) = fileparse( $fileName );
 		logit( "dumping catalogue keys found in '$fileName' to 'DATA.D$fName'" );
-        `cat $fileName | catalogdump -om > $directory/DATA.D$fName 2>>$APILogfilename`;
+        `cat $fileName | catalogdump -kf035 -om > $directory/DATA.D$fName 2>>$APILogfilename`;
 		# create a label for the file.
 		createOCLCLableFiles( $fileName, $numRecords, $projectIdMixed );
 	}
@@ -967,19 +975,39 @@ sub dumpCatalog
 #
 sub getDateBounds
 {
+	# Test the string doesn't include a '<' or '>' and is 8 digits.
+	
+	# Test that if the date is 'TODAY', which is valid, convert to ansi date.
+	
 	if  ( $opt{'d'} )
 	{
 		my @dates = split( ',', $opt{'d'});
-		if ( $dates[0] and $dates[0] ne "" and $dates[0] =~ m/\d{8}/ )
+		if ( defined( $dates[0] ))
 		{
-			$startDate = $dates[0];
+			if ( $dates[0] =~ m/\d{8}/ )
+			{
+				$startDate = $dates[0];
+			}
+			elsif ( $dates[0] =~ m/TODAY/ )
+			{
+				# Convert 'TODAY' keyword into today's ANSI date.
+				chomp( $startDate = `transdate -d-0` );
+			}
 		}
-		if ( $dates[1] and $dates[1] ne "" and $dates[1] =~ m/\d{8}/ )
+		if ( defined( $dates[1] ))
 		{
-			$endDate = $dates[1];
+			if ( $dates[1] =~ m/\d{8}/ )
+			{
+				$endDate = $dates[1];
+			}
+			elsif ( $dates[1] =~ m/TODAY/ )
+			{
+				# Convert 'TODAY' keyword into today's ANSI date.
+				chomp( $endDate = `transdate -d-0` );
+			}
 		}
 	}
-	logit( "date boundaries set to '>$startDate<$endDate'" );
+	logit( "date boundaries, start: $startDate, and end: $endDate" );
 	return ">$startDate<$endDate";
 }
 
@@ -1162,6 +1190,7 @@ sub createStandAloneLabelFile
 #
 # param:  dataFileName string - like /s/sirsi/Unicorn/120829.FILE1
 # param:  recordCount integer - number of records in the file
+# param:  project id - OCLC project number.
 # return: 
 # side effect: creates a label file named LABEL.D<dataFileName>
 #### TEST ####
@@ -1175,6 +1204,8 @@ sub createOCLCLableFiles
 	print LABEL "RBF  $numRecords\n"; # like: 88947
 	print LABEL "DSN  DATA.D$fileName\n"; # DATA.D110405.LAST
 	print LABEL "ORS  ".uc( $edxAccount )."\n";   # Institution id.
+	# If the -p switch is used, over-ride the value sent as a parameter.
+	$projectId = $opt{ 'p' } if ( $opt{ 'p' } );
 	print LABEL "FDI  ".uc( $projectId )."\n"; # project code number.
 	close( LABEL );
 	logit( "created LABEL file '$labelFileName'" );
