@@ -397,7 +397,7 @@ if ($opt{'D'})
 	my @histLogs = getRelevantHistoryLogFiles();
 	# collect codes of deleted items.
 	my $allFlexKeysFromHistory = collectDeletedItems( @histLogs );	
-	# Now we will check for call nums that arn't in the catalog since those are are the flexkeys 
+	# Now we will check for call nums that aren't in the catalogue since those are the flexkeys 
 	# for titles that no longer exist, and by definition, have been deleted.
 	my $initialFlexKeyFile       = qq{$tmpDir/tmp_a};
 	my $flexKeysNotInCatalogFile = qq{$tmpDir/tmp_b};
@@ -420,7 +420,9 @@ if ($opt{'D'})
 	open( DELETED_FLEX_KEYS, "<$flexKeysNotInCatalogFile" ) or die "Couldn't open '$flexKeysNotInCatalogFile': $!\n";
 	while (<DELETED_FLEX_KEYS>)
 	{
-		# now parse out the flex key from: **error number 111 on catalog not found, key=526625 flex=ADI-7542
+		# now parse out the flex key from: 
+		# NOTE: The cat key is accurate but the flex key in an error message refers to the previous output line so is not reliable.
+		# **error number 111 on catalog not found, key=526625 flex=ADI-7542
 		next if ( not m/flex=/ ); # because there are sirsi codes at the bottom, so skip them
 		my $deletedFlexKey = trim( substr( $_, ( index( $_, "flex=" ) + length( "flex=" )) ) );
 		chomp $deletedFlexKey;
@@ -526,16 +528,15 @@ close(LOG);
 # ======================== Functions =========================
 
 # bash-3.00$ head D120906.R466902.XREFRPT.txt
-#     OCLC XREF REPORT
-#
-#  OCLC        Submitted
-#  Control #   001 Field
-# 727705591    2011023163
-# 795038896    2011033697
-# 809219600    2011033698
-# 746489730    2011033699
-# 746489731    2011033700
-# 746489732    2011033701
+#    OCLC XREF REPORT
+#             
+#    OCLC        Submitted
+#    Control #   001 Field
+#    51296469    a475180                                                          
+#    51042192    a475689                                                          
+#    51868698    a475713                                                          
+#    51282754    a475733                                                          
+#    51276424    a475735                                                          
 sub overlayOCLCControlNumber
 {
 	# find all the files that match the D120906.R466902.XREFRPT.txt file name.
@@ -634,7 +635,7 @@ sub get001OverlayMARCRecord
 	# Updating by cat key is more reliable but produces errors like:
 	# **Entry ID not found in format MARC: 1003
 	# because there is no entry for 1003 in the entry id config for MARC - it's a Sirsi number
-	# not related to MARC records.
+	# not related to MARC records, that is, valid MARC bib records only go up to .999. 
 	my ( $catKey, $oclcNumber ) = @_;
 	return "" if ( not $catKey or not $oclcNumber ); # if either not fufilled then return early.
 	my $marc = "*** DOCUMENT BOUNDARY ***\n";
@@ -740,7 +741,7 @@ sub collectDeletedItems
 	while ( @logFiles )
 	{
 		my $file = shift( @logFiles );
-		my $result = `gzgrep FVFF $file`;
+		my $result = `gzgrep FVFF $file | grep NOY`;
 		my @potentialItems  = split( '\n', $result );
 		foreach my $logLine ( @potentialItems )
 		{
@@ -751,7 +752,8 @@ sub collectDeletedItems
 			$searchIsOn = 0 if ( $searchIsOn and $logLine =~ m/^E($myEndDate)/ );
 			if ( $searchIsOn )
 			{
-				if ( $logLine =~ m/\^aA\(OCoLC\)/ or $logLine =~ m/\^aA\(Sirsi\)/ or $logLine =~ m/\^aAocm/ )
+				# E201405271803190011R ^S75FVFFADMIN^FEEPLMNA^FcNONE^NQ31221079015892^NOY^NSEPLJPL^IUa554837^tJ554837^aA(OCoLC)56729751^^O00099
+				if ( $logLine =~ m/\^aA\s?\(OCoLC\)/ or $logLine =~ m/\^aA\s?\(Sirsi\)/ or $logLine =~ m/\^aA\s?oc[m|n]/ or $logLine =~ m/\^aA\s?on/)
 				{
 					my ( $flexKey, $oclcNumber ) = getFlexKeyOCLCNumberPair( $logLine );
 					$items->{ $flexKey } = $oclcNumber;
@@ -766,19 +768,20 @@ sub collectDeletedItems
 # Returns the flex key and oclc number pair.
 # param:  log record line string.
 # return: (key, value) flexkey and oclc number.
-sub getFlexKeyOCLCNumberPair
+sub getFlexKeyOCLCNumberPair($)
 {
-	my $logRecord = $_[0];
+	my $logRecord = shift;
 	my $key;
 	my $value;
 	my @entries = split( /\^/, $logRecord );
 	foreach my $entry ( @entries )
 	{
+		# grab the flex key 'IU' field
 		$key   = $entry if ( $entry =~ s/^IU// );
 		if ( $entry =~ s/^aA// )
 		{
 			$entry =~ s/\s//g;        # get rid of whitespace.
-			$entry =~ s/Sirsi/OCoLC/; # Change sirsi id to OCoLC prefix.
+			# $entry =~ s/Sirsi/OCoLC/; # Change sirsi id to OCoLC prefix. WHY??
 			$value = $entry;
 		}
 	}
