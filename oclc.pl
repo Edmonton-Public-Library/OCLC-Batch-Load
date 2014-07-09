@@ -36,6 +36,7 @@
 # Author:  Andrew Nisbet
 # Date:    June 4, 2012
 # Rev:     
+#          0.8 - Removed '-U' flag because it a much better implementation can be found in oclcupdate.pl.
 #          0.7 - Added 'TODAY' as keyword for selection dates. Added -kf035 for catalogdump
 #                Added -p to specify a project number other than the default values. 
 #          0.6 - Updated comments, removed trailing module '1' EOF marker. 
@@ -56,7 +57,7 @@ use File::Basename;  # Used in ftp() for local and remote file identification.
 use POSIX;           # for ceil()
 
 
-my $VERSION = 0.7;
+my $VERSION = 0.8;
 # Environment setup required by cron to run script because its daemon runs
 # without assuming any environment settings and we need to use sirsi's.
 ###############################################
@@ -132,7 +133,6 @@ my $logFile            = qq{$logDir/oclc$date.log};  # Name and location of the 
 my $defaultCatKeysFile = qq{$oclcDir/catalog_keys.lst}; # master list of catalog keys.
 my $APILogfilename     = qq{$oclcDir/oclcAPI.log};
 my $FTPLogfilename     = qq{$logDir/ftp.log};
-my $flatUpateFile      = qq{$oclcDir/overlay_records.flat};
 # preset these values and getDateBounds() will redefine then as necessary.
 chomp( my $startDate   = `transdate -m-1` );
 chomp( my $endDate     = `transdate -m-0` );
@@ -180,7 +180,8 @@ usage: $0 [-acADrtuwx] [-M file] [-s file] [-f files] [-z <n>] [-d"[start_date],
                  or yymmdd.LAST since $0 needs to count the number of records; the DATA.D MARC file has 1 line.
  -M [file]     : Creates a MARC DATA.D file ready for uploading from a given flex keys file (like 120829.FILE5).
  -p [project]  : Use this project number instead of the default values set within the script.
- -U            : Updates bibrecords with missing OCLC numbers extracted from OCLC CrossRef Reports 
+ -U            : DEPRECATED: Use oclcupdate.pl instead.
+                  Updates bibrecords with missing OCLC numbers extracted from OCLC CrossRef Reports 
                  (like D120913.R468704.XREFRPT.txt).
  -r            : Reset OCLC password.
  -s [file]     : Split input into maximum number of records per DATA file(default 90000).
@@ -332,16 +333,15 @@ sub init
 		createStandAloneMARCFile( $opt{'M'} );
 		exit( 1 );
 	}
-	if ( $opt{'U'} )# create a MARC file and LABEL file for uploading from a [date].LAST file.
+	if ( $opt{'U'} )# DEPRECATED: create a MARC file and LABEL file for uploading from a [date].LAST file.
 	{
-		exit( 0 ) if ( not overlayOCLCControlNumber( ) );
+		print "**Error: deprecated function. Use oclcupdate.pl instead.";
 		exit( 1 );
 	}
 	if ( $opt{'w'} ) # clean up directory
 	{
 		unlink( $defaultCatKeysFile ) if ( -e $defaultCatKeysFile ); # master list of catalog keys.
 		unlink( $APILogfilename ) if ( -e $APILogfilename );
-		unlink( $flatUpateFile ) if ( -e $flatUpateFile );
 		my @fileList = <*\.log>;
 		foreach my $file ( @fileList )
 		{
@@ -526,146 +526,6 @@ if ( $opt{'f'} )
 close(LOG);
 
 # ======================== Functions =========================
-
-# bash-3.00$ head D120906.R466902.XREFRPT.txt
-#    OCLC XREF REPORT
-#             
-#    OCLC        Submitted
-#    Control #   001 Field
-#    51296469    a475180                                                          
-#    51042192    a475689                                                          
-#    51868698    a475713                                                          
-#    51282754    a475733                                                          
-#    51276424    a475735                                                          
-sub overlayOCLCControlNumber
-{
-	# find all the files that match the D120906.R466902.XREFRPT.txt file name.
-	my @fileList = getMixedReports();
-	my $tmpFile = qq{$tmpDir/tmp_a};
-	while ( @fileList )
-	{
-		my $report = shift( @fileList );
-		logit( "reading '$report'" );
-		# read in each report and fill a hash ref with our 001 field and the OCLC number equiv.
-		my $oclcNumberHash = getXRefRecords( $report );
-		# hash contains 001Field->{OCLC#}
-		# optimize seltext query: format hash keys into a file ready for pipeing into seltext
-		open( SEARCH, ">$tmpFile" ) or die "Couldn't open '$tmpFile' to write: $!\n";
-		for my $key ( keys %$oclcNumberHash )
-		{
-			print SEARCH "$key {001}\n";
-		}
-		close( SEARCH );
-		logit( "found ".scalar( keys %$oclcNumberHash )." OCLC records" );
-		# Create hash of cat keys and OCLC numbers for dumping into a flat MARC file for editmarc.
-		my $catKeyHash = get001CatKeys( $oclcNumberHash, $tmpFile );
-		logit( "seltext found ".scalar( keys %$catKeyHash )." cat keys" );
-		# now match the .001. record to the OCLC number and write it to a flat marc file.
-		open( MARC_FLAT, ">$flatUpateFile" ) or die "Error: unable to write to '$flatUpateFile': $!\n";
-		while( my ($catKey, $oclcNumber) = each %$catKeyHash ) 
-		{
-			print MARC_FLAT get001OverlayMARCRecord( $catKey, $oclcNumber );
-		}
-		close( MARC_FLAT );
-		logit( "updating ".scalar( keys %$catKeyHash )." catalogue records" );
-		`cat $flatUpateFile | catalogmerge -aMARC -fd -if -t035 -r -un -bc 2>err.log` if ( not -z $flatUpateFile );
-		unlink( $tmpFile );
-	}
-	logit( "update of .035. records complete" );
-	return 1;
-}
-
-# Creates a reference table of catalogue keys and their corresponding corrected OCLC numbers where required.
-# That is to say, only 035 records that need to be updated will be added to the table.
-# param:  name of file for seltext to process with 'seltext -lBOTH -oA 2>/dev/null'
-# return: hash reference (new) .001.->cat key numbers.
-sub get001CatKeys
-{
-	my ( $oclc001RecordHash, $oclcNumberFile ) = @_;
-	my $hash = {};
-	my $seltextFoundResult = `cat $oclcNumberFile | seltext -lBOTH | prtmarc.pl -e"001,035" -oCT 2>/dev/null`;
-	# which looks like this when successful:
-	# 951674|sbb00213613|\a(CaAE) a1002664|\a(OCoLC)751833924|
-	my @foundCatalogueEntries = split( '\n', $seltextFoundResult );
-	logit( scalar( @foundCatalogueEntries )." found" );
-	foreach my $line ( @foundCatalogueEntries )
-	{
-		my @record = split( '\|', $line );
-		# 951674|sbb00213613|\a(OCoLC)751833924|
-		my ( $catKey, $zeroZeroOne, @catalogOclcNumbers ) = split( '\|', $line );
-		my $catalogOclcNumber = join( ' ', @catalogOclcNumbers );
-		# this is important since seltext can search with values that include leading whitespace
-		# but the leading whitespace will not match records saved as a hash key.
-		$zeroZeroOne = trim( $zeroZeroOne );
-		my $reportedOclcNumber = $oclc001RecordHash->{ $zeroZeroOne };
-		next if ( not $reportedOclcNumber );
-		$hash->{ $catKey } = $reportedOclcNumber if ( $catalogOclcNumber !~ m/($reportedOclcNumber)/ );
-	}
-	return $hash;
-}
-
-# Creates a reference table of the .001. and corresponding OCLC numbers from an OCLC report.
-# param:  the name of the file to be read; must be a valid XRef file sent from OCLC like D120913.R468637.XREFRPT.txt.
-# return: hash reference of 001 numbers and correct OCLC numbers.
-sub getXRefRecords($)
-{
-	my $file = shift;
-	my $hash = {};
-	open( REPORT, "<$file" ) or die "Error: unable to open '$file': $!\n";
-	while (<REPORT>)
-	{
-		my $line = trim( $_ )."\n"; # Trim takes off the white space and newline.
-		# skip blank lines and lines that don't start with numbers 
-		next if ( $line !~ m/^\d/ ); # skip if the line doesn't start with a number.
-		# lets split the line on the white space swap the values so the 001 field is first.
-		my @oclc001 = split( /\s{4}/, $line );
-		chomp( $oclc001[1] );
-		$hash->{$oclc001[1]} = $oclc001[0];
-	}
-	close( REPORT );
-	return $hash;
-}
-
-# Creates a minimal list of well formed flat MARC record of 001 and 035 fields for overlay.
-# param:  oclc record string oclc number.
-# param:  001 record string catalog 001 field.
-# return: string well formatted flat marc record.
-sub get001OverlayMARCRecord
-{
-	# Updating by cat key is more reliable but produces errors like:
-	# **Entry ID not found in format MARC: 1003
-	# because there is no entry for 1003 in the entry id config for MARC - it's a Sirsi number
-	# not related to MARC records, that is, valid MARC bib records only go up to .999. 
-	my ( $catKey, $oclcNumber ) = @_;
-	return "" if ( not $catKey or not $oclcNumber ); # if either not fufilled then return early.
-	my $marc = "*** DOCUMENT BOUNDARY ***\n";
-	$marc .= "FORM=MARC\n";
-	$marc .= ".1003. |a$catKey\n"; 
-	$marc .= ".035.   |a(OCoLC)$oclcNumber\n";
-	return $marc;
-}
-
-# Fetch the valid Mixed reports - not Cancels and not summaries.
-# param:  
-# return: list valid reports to parse out OCLC numbers.
-# TODO:   fix so that it ftps reports from psw.oclc.org.
-sub getMixedReports
-{
-	my @fileList = ();
-	my @tmp = <$oclcDir/D[0-9][0-9][0-9][0-9][0-9][0-9]\.R*>;
-	# my @tmp = <test.XREFRPT.txt>;
-	while ( @tmp )
-	{
-		# separate the XREFRPT files.
-		my $file = shift( @tmp );
-		# TODO get files from the report site itself with wget --user=100313990 --password=some_password http://psw.oclc.org/download.aspx?setd=netbatch
-		# returns a page requesting login.
-		next if ( $file !~ m/XREFRPT/ );
-		push( @fileList, $file );
-	}
-	logit( "found ".scalar( @fileList )." reports: @fileList" );
-	return @fileList;
-}
 
 #*** DOCUMENT BOUNDARY ***
 #FORM=MARC
