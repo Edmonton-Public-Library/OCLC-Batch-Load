@@ -1,10 +1,10 @@
 #!/usr/bin/bash
 
-CRON_DIR="/s/sirsi/Unicorn/EPLwork/cronjobscripts"
-OCLC_DIR="$CRON_DIR/OCLC"
+CRON_DIR=/s/sirsi/Unicorn/EPLwork/cronjobscripts
+OCLC_DIR=$CRON_DIR/OCLC
 source $CRON_DIR/setscriptenvironment.sh
 # this file deliberately not called .log because oclc.pl -w deletes those.
-SUMMARY_LOG="/s/sirsi/Unicorn/EPLwork/cronjobscripts/OCLC/summary.txt"
+SUMMARY_LOG=$OCLC_DIR/summary.txt
 
 # clean up from the last run
 MSG="["`date`"] started OCLC directory cleaned up"
@@ -13,6 +13,12 @@ echo      >> $SUMMARY_LOG
 
 $OCLC_DIR/oclc.pl -w
 
+if ls DATA* LABEL* 2>/dev/null
+then
+	echo "$OCLC_DIR/oclc.pl -w failed to remove data and label files." >> $SUMMARY_LOG
+	echo "$OCLC_DIR/oclc.pl -w failed to remove data and label files." | mailx -s "OCLC Mixed Upload fail" "anisbet@epl.ca"
+	exit 1
+fi
 # create list of Cancels for the last month
 MSG="["`date`"] started cancel list"
 echo $MSG >> $SUMMARY_LOG
