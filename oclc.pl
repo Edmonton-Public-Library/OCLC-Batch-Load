@@ -36,6 +36,7 @@
 # Author:  Andrew Nisbet
 # Date:    June 4, 2012
 # Rev:     
+#          0.9 - Removed '-r' flag because we use JavaFTP.jar for that, fixed function param counts and documented.
 #          0.8 - Removed '-U' flag because it a much better implementation can be found in oclcupdate.pl.
 #          0.7 - Added 'TODAY' as keyword for selection dates. Added -kf035 for catalogdump
 #                Added -p to specify a project number other than the default values. 
@@ -57,7 +58,7 @@ use File::Basename;  # Used in ftp() for local and remote file identification.
 use POSIX;           # for ceil()
 
 
-my $VERSION = 0.8;
+my $VERSION = 0.9;
 # Environment setup required by cron to run script because its daemon runs
 # without assuming any environment settings and we need to use sirsi's.
 ###############################################
@@ -134,8 +135,12 @@ my $defaultCatKeysFile = qq{$oclcDir/catalog_keys.lst}; # master list of catalog
 my $APILogfilename     = qq{$oclcDir/oclcAPI.log};
 my $FTPLogfilename     = qq{$logDir/ftp.log};
 # preset these values and getDateBounds() will redefine then as necessary.
-chomp( my $startDate   = `transdate -m-1` );
-chomp( my $endDate     = `transdate -m-0` );
+# These will run with record dates of 1 month ago to the start of this month.
+# chomp( my $startDate   = `transdate -m-1` );
+# chomp( my $endDate     = `transdate -m-0` );
+# These will run collection records from 7 days ago until today.
+chomp( my $startDate   = `transdate -d-7` );
+chomp( my $endDate     = `transdate -d-0` );
 chomp( my $tmpDir      = `getpathname tmp` );
 open LOG, ">>$logFile";
 
@@ -167,10 +172,10 @@ usage: $0 [-acADrtuwx] [-M file] [-s file] [-f files] [-z <n>] [-d"[start_date],
                  modify dates. Defaults to one month ago as specified by 'transdate -m-1' and 
                  'transdate -m-0' or the start of the current month. Both are optional, and may also
                  include the Unicorn 'TODAY' key word. Do not use modifiers like \< or \> or \=. 
-				 Anything greater than the first value will be used. Anything less than the second
+                 Anything greater than the first value will be used. Anything less than the second
                  value will be used. The default value for start and end dates are used if one or 
                  the other is missing. Example: ",20140901" means dump catalog items after the first of
-				 last month, up until the day before 20140901. "20120101,", means consider records
+                 last month, up until the day before 20140901. "20120101,", means consider records
                  after 20120101 up until the beginning of this month. "20120101,20140901" means
                  consider records from 20120101, upto 20140831.
  -f            : Finds DATA and matching LABEL files in current directory, and FTPs them to OCLC.
@@ -180,10 +185,10 @@ usage: $0 [-acADrtuwx] [-M file] [-s file] [-f files] [-z <n>] [-d"[start_date],
                  or yymmdd.LAST since $0 needs to count the number of records; the DATA.D MARC file has 1 line.
  -M [file]     : Creates a MARC DATA.D file ready for uploading from a given flex keys file (like 120829.FILE5).
  -p [project]  : Use this project number instead of the default values set within the script.
- -U            : DEPRECATED: Use oclcupdate.pl instead.
-                  Updates bibrecords with missing OCLC numbers extracted from OCLC CrossRef Reports 
+ -U            : **DEPRECATED: Use oclcupdate.pl instead.
+                 Updates bibrecords with missing OCLC numbers extracted from OCLC CrossRef Reports 
                  (like D120913.R468704.XREFRPT.txt).
- -r            : Reset OCLC password.
+ -r            : **DEPRECATED: Reset OCLC password.
  -s [file]     : Split input into maximum number of records per DATA file(default 90000).
  -t            : Debug
  -w            : Sweep up the current directory of OCLC litter from the last run.
@@ -207,75 +212,24 @@ EOF
     exit;
 }
 
-# Returns the password, or a new password, based on the contents of the password file 
+# Returns the password from the contents of the password file 
 # specified in the 'path' parameter. Only the first line of the password
 # file is checked and any characters on the first line (with the exception of the 
 # new line character) are considered part of the password. Any other lines in the 
-# file are ignored and will be deleted if the isNewPasswordRequest paramater is passed.
+# file are ignored.
 #
-# param:  isNewPasswordRequest anyType - pass in a 1 if you want a new password generated
-#         The old password is read from file, a new password is generated, the old password
-#         file is deleted and the new password is written to the file specified by param: path. 
+# param:  <none>. 
 # return: password string.
-sub getPassword( $ )
+sub getPassword()
 {
-	my $isNewPasswordRequest = shift;
 	my $oldPassword;
-	my $newPassword;
 	open( PASSWORD, "<$passwordPath" ) or die "error failed to read '$passwordPath' $!\n";
 	my @lines = <PASSWORD>;
 	close( PASSWORD );
 	die "error: password file must contain the password as the first line.\n" if (! @lines or $lines[0] eq "");
 	$oldPassword = $lines[0];
 	chomp( $oldPassword );
-	if ( $isNewPasswordRequest )
-	{
-		my @passwdChars = split('', $oldPassword);
-		++$passwdChars[$#passwdChars];
-		$newPassword = join('',@passwdChars);
-		# now perl helpfully changes ++{z} to {aa}, great but makes password too long for OCLC so 
-		# now we will shorten it by removing the second character. WARNING if the second character
-		# of your password is your one-and-only required digit, your password will fail.
-		$newPassword = join( '',@passwdChars[0,2..$#passwdChars] ) if ( length( $newPassword ) > 8 );
-		open(PASSWORD, ">$passwordPath") or print "error failed to write '$passwordPath' $!, the new password is $newPassword\n";
-		print PASSWORD "$newPassword\n";
-		close(PASSWORD);
-		return $newPassword;
-	}
 	return $oldPassword;
-}
-
-#
-# bash-3.00$ ftp edx.oclc.org
-# Connected to edx.oclc.org.
-# 220-TCPIPFTP IBM FTP CS V1R11 at ESA1.DEV.OCLC.ORG, 17:25:30 on 2012-08-31.
-# 220 Connection will close if idle for more than 10 minutes.
-# Name (edx.oclc.org:sirsi): tcnedm1
-# 331 Send password please.
-# Password:
-# 230-Password was changed.
-# 230 TCNEDM1 is logged on.  Working directory is "TCNEDM1.".
-# Remote system type is MVS.
-# ftp> quit
-# 221 Quit command received. Goodbye.
-# bash-3.00$
-# You only get 5 chances then your account is barred and you have to phone 1-800-
-sub resetPassword
-{
-	# my $oldPassword = getPassword( 0 );
-	# print "oldPassword = '$oldPassword'\n";
-	# my $newPassword = getPassword( 1 );
-	# print "newPassword = '$newPassword'\n";
-	# return;
-	# open( FTP, "| ftp -n $ftpUrl >$FTPLogfilename" ) or die "Error failed to open stream to $ftpUrl: $!\n";
-	# logit( "stream opened." );
-	# print FTP "quote USER $userName\n";
-	# print FTP "quote PASS oldPassword/3dmontov/3dmontov\n";
-	# print FTP "quote PASS $oldPassword/$newPassword/$newPassword\n";
-	# print FTP "bye\n";
-	# print close( FTP )."\n";
-	# print ">>>$?\n";
-	# logit( "connection closed" );
 }
 
 #
@@ -302,6 +256,48 @@ sub trim($)
 	return $string;
 }
 
+# Creates a minimal MARC record with the following format. 
+#*** DOCUMENT BOUNDARY ***
+#FORM=MARC
+#.000. |aamI 0d
+#.001. |aACY-7433
+#.008. |a120831nuuuu    xx            000 u und u
+#.035.   |a(OCoLC)30913700
+#.852.   |aCNEDM
+#
+# param:  HashRef of file names and number of records per file.
+# return: 
+# side effect: creates MARC file and LABEL.
+sub makeMARC( $ )
+{
+	my $fileCountHashRef = shift;
+	logit( "dumping MARC records" ) if ( $opt{'t'} );
+	while( my ($fName, $numRecords) = each %$fileCountHashRef )
+	{
+		# open and read the keys in the file
+		my ($fileName, $directory, $suffix) = fileparse($fName);
+		my $outputFileName = qq{$oclcDir/DATA.D$fileName};
+		my $outputFileFlat = "$outputFileName.flat";
+		logit( "dumping keys found in '$fileName' to '$outputFileFlat'" );
+		open( SPLIT_FILE, "<$fName" ) or die "unable to open split file '$fName': $!\n";
+		open( MARC_FILE, ">$outputFileFlat" ) or die "unable to write to '$outputFileFlat': $!\n";
+		while (<SPLIT_FILE>)
+		{
+			chomp( $_ );
+			print MARC_FILE getFlatMARC( $_, $date );
+		}
+		close( MARC_FILE );
+		close( SPLIT_FILE );
+		# convert with flatskip.
+		`cat $outputFileFlat | flatskip -aMARC -if -om > $outputFileName 2>>$APILogfilename`;
+		logit( "converted '$outputFileFlat' to MARC" );
+		# create a label for the file.
+		unlink( $outputFileFlat );
+		createOCLCLableFiles( qq{$oclcDir/$fileName}, $numRecords, $projectIdCancel );
+	}
+	logit( "dumping of MARC records finished" ) if ( $opt{'t'} );
+}
+
 # Kicks off the setting of various switches.
 # param:  
 # return: 
@@ -323,9 +319,9 @@ sub init
 	{
 		createStandAloneLabelFile( $opt{'m'}, $projectIdMixed );
 	}
-	if ( $opt{'r'} )# expects <yymmdd>.FILEn for mixed project id.
+	if ( $opt{'r'} )
 	{
-		exit( 0 ) if ( not resetPassword( $projectIdMixed ) );
+		print "** Deprecated function '-r' not supported in this script, use JavaFTP.jar instead.\n";
 		exit( 1 );
 	}
 	if ( $opt{'M'} )# create a MARC file and LABEL file for uploading from a [date].LAST file.
@@ -515,11 +511,9 @@ if ( $opt{'f'} )
 {
 	logit( "-f started" ) if ( $opt{'t'} );
 	my @fileList = selectFTPList();
-	my $password = getPassword( 0 );
+	my $password = getPassword();
 	logit( "password read from '$passwordPath'" );
 	logit( "ftp successful" ) if ( ftp( $ftpUrl, $ftpDir, $userName, $password, @fileList ) );
-	# Test ftp site.
-	# logit( "ftp successful" ) if ( ftp( "ftp.epl.ca", "atest", "mark", "R2GnBVtt", @fileList ) );
 	logit( "-f finished" ) if ( $opt{'t'} );
 }
 
@@ -527,54 +521,17 @@ close(LOG);
 
 # ======================== Functions =========================
 
-#*** DOCUMENT BOUNDARY ***
-#FORM=MARC
-#.000. |aamI 0d
-#.001. |aACY-7433
-#.008. |a120831nuuuu    xx            000 u und u
-#.035.   |a(OCoLC)30913700
-#.852.   |aCNEDM
-#
-# param:  HashRef of file names and lengths
-# return: 
-# side effect: creates MARC file and LABEL.
-sub makeMARC
-{
-	my $fileCountHashRef = shift;
-	logit( "dumping MARC records" ) if ( $opt{'t'} );
-	while( my ($fName, $numRecords) = each %$fileCountHashRef )
-	{
-		# open and read the keys in the file
-		my ($fileName, $directory, $suffix) = fileparse($fName);
-		my $outputFileName = qq{$oclcDir/DATA.D$fileName};
-		my $outputFileFlat = "$outputFileName.flat";
-		logit( "dumping keys found in '$fileName' to '$outputFileFlat'" );
-		open( SPLIT_FILE, "<$fName" ) or die "unable to open split file '$fName': $!\n";
-		open( MARC_FILE, ">$outputFileFlat" ) or die "unable to write to '$outputFileFlat': $!\n";
-		while (<SPLIT_FILE>)
-		{
-			chomp( $_ );
-			print MARC_FILE getFlatMARC( $_, $date );
-		}
-		close( MARC_FILE );
-		close( SPLIT_FILE );
-		# convert with flatskip.
-		`cat $outputFileFlat | flatskip -aMARC -if -om > $outputFileName 2>>$APILogfilename`;
-		logit( "converted '$outputFileFlat' to MARC" );
-		# create a label for the file.
-		unlink( $outputFileFlat );
-		createOCLCLableFiles( qq{$oclcDir/$fileName}, $numRecords, $projectIdCancel );
-	}
-	logit( "dumping of MARC records finished" ) if ( $opt{'t'} );
-}
+
 
 # Gets a well-formed flat MARC record of the argument record and date string.
 # This subroutine is used in the Cancels process.
 # param:  The record is a flex key and oclcNumber separated by a pipe: AAN-1945|(OCoLC)3329882|
+# param:  The date is, well, the date in 'yymmdd' format. Example: 120831
 # return: flat MARC record as a string.
-sub getFlatMARC
+sub getFlatMARC( $$ )
 {
-	my ( $record, $date ) = @_;
+	my $record                   = shift;
+	my $date                     = shift;
 	my ( $flexKey, $oclcNumber ) = split( '\|', $record );
 	my $returnString = "*** DOCUMENT BOUNDARY ***\n";
 	$returnString .= "FORM=MARC\n";
@@ -586,7 +543,6 @@ sub getFlatMARC
 	return $returnString;
 }
 
-#
 # Search the arg list of log files for entries of remove item (FV) and remove title option (NOY).
 # param:  log files List - list of log files to search.
 # return: Hash reference of cat keys as key and history log entry as value.
@@ -628,7 +584,7 @@ sub collectDeletedItems
 # Returns the flex key and oclc number pair.
 # param:  log record line string.
 # return: (key, value) flexkey and oclc number.
-sub getFlexKeyOCLCNumberPair($)
+sub getFlexKeyOCLCNumberPair( $ )
 {
 	my $logRecord = shift;
 	my $key;
