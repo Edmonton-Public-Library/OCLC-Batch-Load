@@ -36,6 +36,7 @@
 # Author:  Andrew Nisbet
 # Date:    June 4, 2012
 # Rev:     
+#          1.0 - Fixed -w flag to remove from the OCLC directory.
 #          0.9 - Removed '-r' flag because we use JavaFTP.jar for that, fixed function param counts and documented.
 #          0.8 - Removed '-U' flag because it a much better implementation can be found in oclcupdate.pl.
 #          0.7 - Added 'TODAY' as keyword for selection dates. Added -kf035 for catalogdump
@@ -58,7 +59,7 @@ use File::Basename;  # Used in ftp() for local and remote file identification.
 use POSIX;           # for ceil()
 
 
-my $VERSION = 0.9;
+my $VERSION = 1.0;
 # Environment setup required by cron to run script because its daemon runs
 # without assuming any environment settings and we need to use sirsi's.
 ###############################################
@@ -338,22 +339,22 @@ sub init
 	{
 		unlink( $defaultCatKeysFile ) if ( -e $defaultCatKeysFile ); # master list of catalog keys.
 		unlink( $APILogfilename ) if ( -e $APILogfilename );
-		my @fileList = <*\.log>;
+		my @fileList = <$oclcDir/*\.log>;
 		foreach my $file ( @fileList )
 		{
 			unlink( $file ) if ( -e $file );
 		}
-		@fileList = <DATA\.D[0-9][0-9][0-9][0-9][0-9][0-9]\.*>;
+		@fileList = <$oclcDir/DATA\.D[0-9][0-9][0-9][0-9][0-9][0-9]\.*>;
 		foreach my $file ( @fileList )
 		{
 			unlink( $file ) if ( -e $file );
 		}
-		@fileList = <LABEL\.D[0-9][0-9][0-9][0-9][0-9][0-9]\.*>;
+		@fileList = <$oclcDir/LABEL\.D[0-9][0-9][0-9][0-9][0-9][0-9]\.*>;
 		foreach my $file ( @fileList )
 		{
 			unlink( $file ) if ( -e $file );
 		}
-		@fileList = <[0-9][0-9][0-9][0-9][0-9][0-9]\.*>;
+		@fileList = <$oclcDir/[0-9][0-9][0-9][0-9][0-9][0-9]\.*>;
 		foreach my $file ( @fileList )
 		{
 			unlink( $file ) if ( -e $file );
