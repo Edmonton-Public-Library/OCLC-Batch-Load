@@ -37,6 +37,7 @@ if [ $1 == "cancel" ]
 then
 	$OCLC_DIR/oclc.pl -D
 elif [ $1 == "mixed" ]
+then
 	$OCLC_DIR/oclc.pl -A
 else
 	echo "**error: Invalid argument on command line." >> $SUMMARY_LOG
