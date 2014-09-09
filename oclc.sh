@@ -1,5 +1,37 @@
 #!/usr/bin/bash
-
+####################################################
+#
+# Bash script source file for project discarddbloader 
+# Purpose: Coordinate OCLC Mixed and Cancel uploads.
+# Copyright (C) 2014  Andrew Nisbet
+# Method:  Run API against Exception files, and create a comprehensive file.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
+# MA 02110-1301, USA.
+#
+# Note: This script uses SSH to execute some commands so SSH keys must
+# installed.
+#
+# Author:  Andrew Nisbet, Edmonton Public Library
+# Created: Fri Jan 25 09:00:08 MST 2013
+# Rev: 
+#           
+#          0.2 - Changed email recipients to ilsadmins. 
+#          0.1 - Dev. 
+#
+####################################################
 
 CRON_DIR=/s/sirsi/Unicorn/EPLwork/cronjobscripts
 OCLC_DIR=$CRON_DIR/OCLC
@@ -24,7 +56,7 @@ $OCLC_DIR/oclc.pl -w
 if ls DATA* LABEL* 2>/dev/null
 then
 	echo "$OCLC_DIR/oclc.pl -w failed to remove data and label files." >> $SUMMARY_LOG
-	echo "$OCLC_DIR/oclc.pl -w failed to remove data and label files." | mailx -s "OCLC Mixed Upload fail" "anisbet@epl.ca"
+	echo "$OCLC_DIR/oclc.pl -w failed to remove data and label files." | mailx -s "OCLC Mixed Upload fail" "ilsadmins@epl.ca"
 	exit 1
 else
 	echo "$OCLC_DIR/oclc.pl -w cleaned label and data files." >> $SUMMARY_LOG
@@ -56,4 +88,4 @@ echo $MSG >> $SUMMARY_LOG
 echo      >> $SUMMARY_LOG
 
 # report what you did
-cat $SUMMARY_LOG | mailx -s "OCLC Cancels Upload" "anisbet@epl.ca"
+cat $SUMMARY_LOG | mailx -s "OCLC Cancels Upload" "ilsadmins@epl.ca"
