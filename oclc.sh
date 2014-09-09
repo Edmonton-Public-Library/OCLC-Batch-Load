@@ -28,6 +28,7 @@
 # Created: Fri Jan 25 09:00:08 MST 2013
 # Rev: 
 #           
+#          0.3 - Fixed confusing project reporting. 
 #          0.2 - Changed email recipients to ilsadmins. 
 #          0.1 - Dev. 
 #
@@ -61,15 +62,20 @@ then
 else
 	echo "$OCLC_DIR/oclc.pl -w cleaned label and data files." >> $SUMMARY_LOG
 fi
-# create list of Cancels for the last month
-MSG="["`date`"] started cancel list"
-echo $MSG >> $SUMMARY_LOG
-echo      >> $SUMMARY_LOG
+
 if [ $1 == "cancel" ]
 then
+	# create list of Cancels for the last month
+	MSG="["`date`"] started cancel (project #012570) list"
+	echo $MSG >> $SUMMARY_LOG
+	echo      >> $SUMMARY_LOG
 	$OCLC_DIR/oclc.pl -D
+	
 elif [ $1 == "mixed" ]
 then
+	MSG="["`date`"] started mixed (project #012569) list"
+	echo $MSG >> $SUMMARY_LOG
+	echo      >> $SUMMARY_LOG
 	$OCLC_DIR/oclc.pl -A
 else
 	echo "**error: Invalid argument on command line." >> $SUMMARY_LOG
@@ -88,4 +94,4 @@ echo $MSG >> $SUMMARY_LOG
 echo      >> $SUMMARY_LOG
 
 # report what you did
-cat $SUMMARY_LOG | mailx -s "OCLC Cancels Upload" "ilsadmins@epl.ca"
+cat $SUMMARY_LOG | mailx -s "OCLC record upload complete." "ilsadmins@epl.ca"
