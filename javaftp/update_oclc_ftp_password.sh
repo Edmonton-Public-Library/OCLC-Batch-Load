@@ -35,7 +35,7 @@ then
 	echo "error retrieving OCLC password file from production server." | /usr/bin/mailx -s "OCLC Password change Error `date`" $EMAILS
 	exit -1
 fi
-/usr/lib/jvm/java-7-openjdk/jre/bin/java -cp /home/ilsdev/projects/oclc/javaftp/dist/JavaFTP.jar epl.ftp.FtpPassword
+/usr/bin/java -cp /home/ilsdev/projects/oclc/javaftp/dist/JavaFTP.jar epl.ftp.FtpPassword
 if [ ! -s "$LOCAL_DIR/$PASSWORD_FILE" ]
 then
 	echo "error changing password file on ILSDEV1 `pwd`." | /usr/bin/mailx -s "OCLC Password change Error `date`" $EMAILS
