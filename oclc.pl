@@ -36,6 +36,7 @@
 # Author:  Andrew Nisbet
 # Date:    June 4, 2012
 # Rev:     
+#          1.1 - Fixed request to not have the last file to be named with LAST extension.
 #          1.0 - Fixed -w flag to remove from the OCLC directory.
 #          0.9 - Removed '-r' flag because we use JavaFTP.jar for that, fixed function param counts and documented.
 #          0.8 - Removed '-U' flag because it a much better implementation can be found in oclcupdate.pl.
@@ -59,7 +60,7 @@ use File::Basename;  # Used in ftp() for local and remote file identification.
 use POSIX;           # for ceil()
 
 
-my $VERSION = "1.0";
+my $VERSION = qq{1.1};
 # Environment setup required by cron to run script because its daemon runs
 # without assuming any environment settings and we need to use sirsi's.
 ###############################################
@@ -180,10 +181,10 @@ usage: $0 [-acADrtuwx] [-M file] [-s file] [-f files] [-z <n>] [-d"[start_date],
                  after 20120101 up until the beginning of this month. "20120101,20140901" means
                  consider records from 20120101, upto 20140831.
  -f            : Finds DATA and matching LABEL files in current directory, and FTPs them to OCLC.
- -lyymmdd.LAST : Create a label file for a given CANCEL or Delete file. NOTE: use the yymmdd.FILEn, or yymmdd.LAST
+ -lyymmdd.FILEn: Create a label file for a given CANCEL or Delete file. NOTE: use the yymmdd.FILEn
                  since $0 needs to count the number of records; the DATA.D MARC file has 1 line.
- -myymmdd.LAST : Create a label file for a given MIXED or adds/changes project file. NOTE: use the yymmdd.FILEn,
-                 or yymmdd.LAST since $0 needs to count the number of records; the DATA.D MARC file has 1 line.
+ -myymmdd.FILEn: Create a label file for a given MIXED or adds/changes project file. NOTE: use the yymmdd.FILEn
+                 since $0 needs to count the number of records; the DATA.D MARC file has 1 line.
  -M [file]     : Creates a MARC DATA.D file ready for uploading from a given flex keys file (like 120829.FILE5).
  -p [project]  : Use this project number instead of the default values set within the script.
  -U            : **DEPRECATED: Use oclcupdate.pl instead.
@@ -889,7 +890,7 @@ sub splitFile
 	my $lineCount      = 0;  # current number of lines written to the current file fragment.
 	my $numLinesInput  = 0;  # number of input lines to process.
 	my $fileCount      = 0;  # number of files to create.
-	my @fileNames      = (); # precomposed list of file names
+	my @fileNames      = (); # pre-composed list of file names
 	my $fileName;            # The current file name within the loop
 	# find out how many files we need, this saves us a lot of time renaming the last file.
 	open(INPUT, "<$fileInput") or die "Error opening file to split: $!\n";
@@ -899,14 +900,12 @@ sub splitFile
 	}
 	close( INPUT );
 	$fileCount = ceil( $numLinesInput / $maxRecords );
-	# precompose the split file names
-	for ( my $i = 1; $i < $fileCount; $i++ ) 
+	# pre-compose the split file names
+	for ( my $i = 1; $i <= $fileCount; $i++ ) 
 	{
-		push( @fileNames, qq{$oclcDir/$baseName.FILE$i} ); # [120623.FILE1 ...] 120623.LAST, for generic files
+		push( @fileNames, qq{$oclcDir/$baseName.FILE$i} ); # [120623.FILE1 ...] for generic files
 		# -c will prepend the correct 'DATA.D' when dumping the catalog records.
 	}
-	# the last file is always called *.LAST even if there is only one file.
-	push( @fileNames, qq{$oclcDir/$baseName.LAST} );
 	# open the input file and prepare read the contents into each file fragment.
 	open(INPUT, "<$fileInput") or die "Error opening file to split: $!\n";
 	while(<INPUT>)

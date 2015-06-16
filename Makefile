@@ -9,7 +9,7 @@ LOCAL=~/projects/oclc/
 APP=oclc.pl
 FTP=ftp.pl
 WRAPPER_CANCELS=oclc.sh
-
+.PHONY: test put putftp test_ftp
 put: test
 	scp ${LOCAL}${APP} ${USER}@${SERVER}:${REMOTE}
 	scp ${LOCAL}${WRAPPER_CANCELS} ${USER}@${SERVER}:${REMOTE}
