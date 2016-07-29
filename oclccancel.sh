@@ -27,16 +27,15 @@
 # Author:  Andrew Nisbet, Edmonton Public Library
 # Created: Fri Jan 25 09:00:08 MST 2013
 # Rev: 
-#           
-#          0.3 - Fixed confusing project reporting. 
-#          0.2 - Changed email recipients to ilsadmins. 
-#          0.1 - Dev. 
+#            
+#          0.1 - Refactored out cancels from oclc.sh. 
 #
 ####################################################
 
 CRON_DIR=/s/sirsi/Unicorn/EPLwork/cronjobscripts
 OCLC_DIR=$CRON_DIR/OCLC
 source $CRON_DIR/setscriptenvironment.sh
+export PIPE=/s/sirsi/Unicorn/Bincustom/pipe.pl
 # this file deliberately not called .log because oclc.pl -w deletes those.
 SUMMARY_LOG=$OCLC_DIR/summary.txt
 cd $OCLC_DIR
@@ -44,49 +43,20 @@ cd $OCLC_DIR
 MSG="["`date`"] started OCLC directory cleaned up"
 echo $MSG > $SUMMARY_LOG
 echo      >> $SUMMARY_LOG
-if [ $# -ne 1 ]
-then
-	echo "**error: Invalid number of arguments on command line." >> $SUMMARY_LOG
-	echo "   Usage: $0 ['cancel'|'mixed']"
-	exit 4
-fi
-
+# Clean up the working directory of old label and data files.
 $OCLC_DIR/oclc.pl -w
 
-# If we can ls files here something went wrong.
-if ls DATA* LABEL* 2>/dev/null
-then
-	echo "$OCLC_DIR/oclc.pl -w failed to remove data and label files." >> $SUMMARY_LOG
-	echo "$OCLC_DIR/oclc.pl -w failed to remove data and label files." | mailx -s "OCLC Mixed Upload fail" "ilsadmins@epl.ca"
-	exit 1
-else
-	echo "$OCLC_DIR/oclc.pl -w cleaned label and data files." >> $SUMMARY_LOG
-fi
-
-if [ $1 == "cancel" ]
-then
-	# create list of Cancels for the last month
-	MSG="["`date`"] started cancel (project #012570) list"
-	echo $MSG >> $SUMMARY_LOG
-	echo      >> $SUMMARY_LOG
-	$OCLC_DIR/oclc.pl -D
-	
-elif [ $1 == "mixed" ]
-then
-	MSG="["`date`"] started mixed (project #012569) list"
-	echo $MSG >> $SUMMARY_LOG
-	echo      >> $SUMMARY_LOG
-	$OCLC_DIR/oclc.pl -A
-else
-	echo "**error: Invalid argument on command line." >> $SUMMARY_LOG
-	echo "   Usage: $0 ['cancel'|'mixed']"
-	exit 4
-fi
+# create list of Cancels for the last month
+MSG="["`date`"] started cancel (project #012570) list"
+echo $MSG >> $SUMMARY_LOG
+echo      >> $SUMMARY_LOG
+$OCLC_DIR/oclc.pl -D
 
 # ftp the lists to OCLC
 MSG="["`date`"] ftp'ed files to OCLC"
 echo $MSG >> $SUMMARY_LOG
 echo      >> $SUMMARY_LOG
+cat `ls -tc1 LABEL.* | $PIPE -L+1` | $PIPE -L2 >> $SUMMARY_LOG
 $OCLC_DIR/oclc.pl -f
 
 MSG="["`date`"] generated summary"
@@ -94,4 +64,4 @@ echo $MSG >> $SUMMARY_LOG
 echo      >> $SUMMARY_LOG
 
 # report what you did
-cat $SUMMARY_LOG | mailx -s "OCLC record upload complete." "ilsadmins@epl.ca"
+cat $SUMMARY_LOG | mailx -s "OCLC cancels upload complete." "ilsadmins@epl.ca"

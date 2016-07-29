@@ -8,11 +8,13 @@ REMOTE=~/Unicorn/EPLwork/cronjobscripts/OCLC
 LOCAL=~/projects/oclc/
 APP=oclc.pl
 FTP=ftp.pl
-WRAPPER_CANCELS=oclc.sh
+WRAPPER_CANCEL=oclccancel.sh
+WRAPPER_MIXED=oclcmixed.sh
 .PHONY: test put putftp test_ftp
 put: test
 	scp ${LOCAL}${APP} ${USER}@${SERVER}:${REMOTE}
-	scp ${LOCAL}${WRAPPER_CANCELS} ${USER}@${SERVER}:${REMOTE}
+	scp ${LOCAL}${WRAPPER_CANCEL} ${USER}@${SERVER}:${REMOTE}
+	scp ${LOCAL}${WRAPPER_MIXED} ${USER}@${SERVER}:${REMOTE}
 test:
 	perl -c ${APP}
 # these rules are for the FTP test script only.
