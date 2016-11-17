@@ -28,6 +28,7 @@
 # Created: Fri Jan 25 09:00:08 MST 2013
 # Rev: 
 #            
+#          0.2 - Wrapped email with additional email reporting to summary. 
 #          0.1 - Refactored out cancels from oclc.sh. 
 #
 ####################################################
@@ -65,3 +66,7 @@ echo      >> $SUMMARY_LOG
 
 # report what you did
 cat $SUMMARY_LOG | mailx -s "OCLC cancels upload complete." "ilsadmins@epl.ca"
+MSG="["`date`"] summary emailed"
+echo $MSG >> $SUMMARY_LOG
+
+# EOF
