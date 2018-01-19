@@ -32,21 +32,21 @@ cd $LOCAL_DIR
 scp $USER@$SERVER:$REMOTE_DIR/$PASSWORD_FILE $LOCAL_DIR
 if [ "$?" -ne 0 ]
 then
-	echo "error retrieving OCLC password file from production server." | /usr/bin/mailx -s "OCLC Password change Error `date`" $EMAILS
+	echo "error retrieving OCLC password file from production server." | /usr/bin/mailx -a'From:ilsdev@ilsdev1.epl.ca' -s "OCLC Password change Error `date`" $EMAILS
 	exit -1
 fi
 /usr/bin/java -cp /home/ilsdev/projects/oclc/javaftp/dist/JavaFTP.jar epl.ftp.FtpPassword
 if [ ! -s "$LOCAL_DIR/$PASSWORD_FILE" ]
 then
-	echo "error changing password file on ILSDEV1 `pwd`." | /usr/bin/mailx -s "OCLC Password change Error `date`" $EMAILS
+	echo "error changing password file on ILSDEV1 `pwd`." | /usr/bin/mailx -a'From:ilsdev@ilsdev1.epl.ca' -s "OCLC Password change Error `date`" $EMAILS
 	exit -1
 else
 	scp $LOCAL_DIR/$PASSWORD_FILE $USER@$SERVER:$REMOTE_DIR
 	if [ "$?" -ne 0 ]
 	then
-		echo "error returning OCLC password file to production server." | /usr/bin/mailx -s "OCLC Password change Error `date`" $EMAILS
+		echo "error returning OCLC password file to production server." | /usr/bin/mailx -a'From:ilsdev@ilsdev1.epl.ca' -s "OCLC Password change Error `date`" $EMAILS
 		exit -1
 	fi
-	echo "OCLC password changed to '`cat $LOCAL_DIR/$PASSWORD_FILE`' on `date`.\nThis is informational only, no action is required." | /usr/bin/mailx -s "OCLC Password change" $EMAILS
+	echo "OCLC password changed to '`cat $LOCAL_DIR/$PASSWORD_FILE`' on `date`.\nThis is informational only, no action is required." | /usr/bin/mailx -a'From:ilsdev@ilsdev1.epl.ca' -s "OCLC Password change" $EMAILS
 fi
 # EOF
