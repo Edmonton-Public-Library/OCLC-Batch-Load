@@ -53,6 +53,15 @@
 ########################################################################
 
 use strict;
+chomp($ENV{'HOME'} = `. ~/.bashrc; echo ~`);
+open(my $IN, "<", "$ENV{'HOME'}/Unicorn/Config/environ") or die "$0: $! $ENV{'HOME'}/Unicorn/Config/environ\n";
+while(<$IN>)
+{
+    chomp;
+    my ($key, $value) = split(/=/, $_);
+    $ENV{$key} = "$value";
+}
+close($IN);
 use warnings;
 use vars qw/ %opt /;
 use Getopt::Std;
@@ -65,8 +74,8 @@ my $VERSION = qq{1.1};
 # without assuming any environment settings and we need to use sirsi's.
 ###############################################
 # *** Edit these to suit your environment *** #
-$ENV{'PATH'} = ":/s/sirsi/Unicorn/Bincustom:/s/sirsi/Unicorn/Bin:/s/sirsi/Unicorn/Search/Bin:/usr/bin";
-$ENV{'UPATH'} = "/s/sirsi/Unicorn/Config/upath";
+# $ENV{'PATH'} = ":/s/sirsi/Unicorn/Bincustom:/s/sirsi/Unicorn/Bin:/s/sirsi/Unicorn/Search/Bin:/usr/bin";
+# $ENV{'UPATH'} = "/s/sirsi/Unicorn/Config/upath";
 ###############################################
 ##### function must be first because logging uses it almost immediately.
 # Returns a timestamp for the log file only. The Database uses the default
