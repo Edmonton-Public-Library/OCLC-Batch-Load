@@ -74,8 +74,8 @@ my $VERSION = qq{1.1};
 # without assuming any environment settings and we need to use sirsi's.
 ###############################################
 # *** Edit these to suit your environment *** #
-# $ENV{'PATH'} = ":/s/sirsi/Unicorn/Bincustom:/s/sirsi/Unicorn/Bin:/s/sirsi/Unicorn/Search/Bin:/usr/bin";
-# $ENV{'UPATH'} = "/s/sirsi/Unicorn/Config/upath";
+# $ENV{'PATH'} = ":/software/EDPL/Unicorn/Bincustom:/software/EDPL/Unicorn/Bin:/software/EDPL/Unicorn/Search/Bin:/usr/bin";
+# $ENV{'UPATH'} = "/software/EDPL/Unicorn/Config/upath";
 ###############################################
 ##### function must be first because logging uses it almost immediately.
 # Returns a timestamp for the log file only. The Database uses the default
@@ -138,7 +138,7 @@ my $ftpDir             = qq{edx.ebsb.$edxAccount.ftp};
 my $maxRecords         = 16000;            # Max number records we can upload at a time, use -s to change.
 my $date               = getTimeStamp;     # current date in ascii.
 ############### change to your favourite since cron needs to know where to put all the results.
-my $oclcDir            = qq{/s/sirsi/Unicorn/EPLwork/cronjobscripts/OCLC};
+my $oclcDir            = qq{/software/EDPL/Unicorn/EPLwork/cronjobscripts/OCLC};
 my $passwordPath       = qq{$oclcDir/password.txt};
 my $logDir             = $oclcDir;
 my $logFile            = qq{$logDir/oclc$date.log};  # Name and location of the log file.
@@ -1016,7 +1016,7 @@ sub createStandAloneLabelFile
 # ORS  CNEDM
 # FDI  P012569
 #
-# param:  dataFileName string - like /s/sirsi/Unicorn/120829.FILE1
+# param:  dataFileName string - like /software/EDPL/Unicorn/120829.FILE1
 # param:  recordCount integer - number of records in the file
 # param:  project id - OCLC project number.
 # return: 
