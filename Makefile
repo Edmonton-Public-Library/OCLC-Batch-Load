@@ -1,5 +1,5 @@
 # copies most rescent files from eplapp for updating to git.
-SERVER=eplapp.library.ualberta.ca
+SERVER=edpl.sirsidynix.net
 USER=sirsi
 # this is the test directory. Production is in cronjobscripts.
 # this allows us to move test scripts to the server without
