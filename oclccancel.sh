@@ -33,10 +33,10 @@
 #
 ####################################################
 
-CRON_DIR=/s/sirsi/Unicorn/EPLwork/cronjobscripts
+CRON_DIR=/software/EDPL/Unicorn/EPLwork/cronjobscripts
 OCLC_DIR=$CRON_DIR/OCLC
 source $CRON_DIR/setscriptenvironment.sh
-export PIPE=/s/sirsi/Unicorn/Bincustom/pipe.pl
+export PIPE=/software/EDPL/Unicorn/Bincustom/pipe.pl
 # this file deliberately not called .log because oclc.pl -w deletes those.
 SUMMARY_LOG=$OCLC_DIR/summary.txt
 cd $OCLC_DIR
