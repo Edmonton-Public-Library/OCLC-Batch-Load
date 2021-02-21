@@ -24,9 +24,9 @@ export SHELL=/bin/sh
 export PWD=/home/ilsdev
 USER=sirsi
 EMAILS="ilsadmins@epl.ca"
-SERVER=eplapp.library.ualberta.ca
+SERVER=edpl.sirsidynix.net
 LOCAL_DIR=/home/ilsdev/projects/oclc/javaftp
-REMOTE_DIR=/s/sirsi/Unicorn/EPLwork/cronjobscripts/OCLC
+REMOTE_DIR=/software/EDPL/Unicorn/EPLwork/cronjobscripts/OCLC
 PASSWORD_FILE=password.txt
 cd $LOCAL_DIR
 scp $USER@$SERVER:$REMOTE_DIR/$PASSWORD_FILE $LOCAL_DIR
